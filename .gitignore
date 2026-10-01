@@ -1,0 +1,14 @@
+.Rhistory
+*.html
+
+docs/**/*.*
+!docs/**/*.md
+
+data-raw/**/*.*
+!data-raw/**/*.md
+
+temp/**/*.*
+!temp/**/*.md
+
+.Rproj.user
+.claude/
