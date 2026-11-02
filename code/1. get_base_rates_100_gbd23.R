@@ -94,8 +94,6 @@ files <- list.files(paste0(wd_raw,"GBD/GBD2023/2020-2023/"), pattern = "\\.csv$"
 # Read and combine using rbindlist
 dt_23 <- rbindlist(lapply(files, fread), use.names = TRUE, fill = TRUE)
 
-
-
 ## Now complete the series
 setwd(wd_raw)
 
@@ -220,74 +218,6 @@ dt[, c("location_clean") := NULL]
 
 # save temp baseline rates from gbd 2023
 saveRDS(dt, file = paste0(wd_raw,"GBD/","temp_1baseline_rates_gbd23.rds"))
-
-## checking names
-# locs_check <- c(
-#   "Armenia", "Guyana", "Lebanon", "Hungary", "Chile", "Germany",
-#   "Philippines", "Haiti", "Ethiopia", "North Macedonia", "Argentina",
-#   "Montenegro", "India", "Mauritania", "Uruguay", "Tuvalu", "Mexico",
-#   "Libya", "Brunei Darussalam", "Sri Lanka", "Poland", "Nicaragua",
-#   "Zimbabwe", "Thailand", "Eswatini", "Nepal", "American Samoa",
-#   "South Africa", "Jamaica", "Iceland", "Ireland", "Cook Islands",
-#   "Panama", "Romania", "Morocco", "Timor-Leste", "Greece", "Bermuda",
-#   "Georgia", "Kyrgyzstan", "Nigeria", "Kenya", "Oman", "Saint Lucia",
-#   "Madagascar", "Mauritius", "Saint Vincent and the Grenadines",
-#   "Mongolia", "Malawi", "Singapore", "Republic of Korea",
-#   "Sao Tome and Principe", "Palestine", "Cambodia", "Austria",
-#   "Canada", "Azerbaijan", "Israel",
-#   "Venezuela (Bolivarian Republic of)", "Niger", "Senegal", "Belize",
-#   "South Sudan", "United Republic of Tanzania",
-#   "Democratic People's Republic of Korea", "Benin", "Angola",
-#   "Paraguay", "Kazakhstan", "Slovenia", "United States of America",
-#   "Sierra Leone", "Australia", "Solomon Islands", "Burkina Faso",
-#   "Fiji", "Gabon", "Cameroon", "Syrian Arab Republic", "Palau",
-#   "Taiwan (Province of China)", "Guam", "Malta", "Tunisia", "Bahrain",
-#   "Bolivia (Plurinational State of)", "Republic of Moldova",
-#   "Costa Rica", "Kiribati", "Cabo Verde", "Central African Republic",
-#   "Italy", "Brazil", "Slovakia", "Pakistan", "Equatorial Guinea",
-#   "Seychelles", "Andorra", "Latvia", "Somalia", "Greenland", "Serbia",
-#   "Viet Nam", "Lithuania", "New Zealand", "China",
-#   "Trinidad and Tobago", "Uzbekistan", "Rwanda", "Suriname",
-#   "Northern Mariana Islands", "Turkmenistan", "Saudi Arabia",
-#   "Indonesia", "El Salvador", "Egypt", "Qatar", "Ghana", "Czechia",
-#   "Algeria", "Sweden", "Bahamas", "Samoa", "Japan", "Maldives",
-#   "Guinea", "Switzerland", "Afghanistan", "Marshall Islands",
-#   "Mozambique", "Democratic Republic of the Congo", "Colombia",
-#   "Antigua and Barbuda", "Luxembourg", "Monaco", "Botswana",
-#   "Netherlands", "Finland", "Grenada", "Turkey", "Ecuador", "Sudan",
-#   "France", "Denmark", "Barbados", "Tajikistan", "Spain", "Malaysia",
-#   "Djibouti", "Cyprus", "Togo", "Gambia",
-#   "Lao People's Democratic Republic", "Eritrea", "Niue", "Bulgaria",
-#   "Zambia", "San Marino", "Kuwait", "Estonia", "Ivory Coast", "Iraq",
-#   "Micronesia (Federated States of)", "Portugal", "Jordan", "Nauru",
-#   "Congo", "Chad", "Papua New Guinea", "Norway", "Dominica",
-#   "Tokelau", "Comoros", "Bosnia and Herzegovina", "Yemen",
-#   "Croatia", "Belarus", "United States Virgin Islands",
-#   "Iran (Islamic Republic of)", "Albania", "Peru",
-#   "Saint Kitts and Nevis", "Uganda", "United Arab Emirates",
-#   "Guinea-Bissau", "Namibia", "Dominican Republic", "Liberia",
-#   "Cuba", "Honduras", "Vanuatu", "Belgium", "Ukraine", "Myanmar",
-#   "Mali", "Bhutan", "Russian Federation", "Tonga", "United Kingdom",
-#   "Puerto Rico", "Guatemala", "Burundi", "Lesotho", "Bangladesh"
-# )
-
-
-# Find any locations in dt$location_name not in locs_check
-# missing_locs <- setdiff(unique(dt$location_clean), locs_check)
-#   
-# countries <- dt[,,by=list(location_clean)]
-
-# IHME Population data
-
-# # build vector of years and corresponding file names
-# years <- 2000:2019
-# files <- sprintf("IHME_GBD_2019_POP_SYA_%d_Y2021M01D28.csv", years)
-# 
-# # # read & stack them in one go
-# gbdpop <- rbindlist(lapply(files, fread))
-# 
-# # # Filter out rows where sex is "both" and location_id equals 533 (Georgia the state)
-# gbdpop <- gbdpop[sex_name != "both" & location_id != 533]
 
 
 # UNWPP instead
@@ -470,6 +400,10 @@ project.all <- function(Country,
 # folder <- "C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/100MLives/data/processed/baseline_rates"
 
 folder <- paste0(wd_temp, "baseline_rates")
+
+if (!dir.exists(folder)) {
+  dir.create(folder, recursive = TRUE)
+}
 
 # List all files (not directories) in there
 files_to_delete <- list.files(

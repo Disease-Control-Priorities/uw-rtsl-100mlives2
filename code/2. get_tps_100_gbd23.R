@@ -429,13 +429,9 @@ baseline_rates <- rbindlist(dt_list, use.names = TRUE, fill = TRUE)
 #folder <- "C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/100MLives/data/processed/tps/"
 folder <- paste0(wd_temp,"tps/")
 
-# if it already exists, delete it (recursively)
-if (dir.exists(folder)) {
-  unlink(folder, recursive = TRUE)
+if (!dir.exists(folder)) {
+  dir.create(folder, recursive = TRUE)
 }
-
-# now create a fresh one
-dir.create(folder)
 
 
 if(run_aod_par == TRUE){
@@ -490,6 +486,10 @@ for (loc in locs) {
 #...........................................................
 
 folder <- paste0(wd_temp,"tps/")
+
+if (!dir.exists(folder)) {
+  dir.create(folder, recursive = TRUE)
+}
 
 # List all .rds files in the folder
 files <- list.files(

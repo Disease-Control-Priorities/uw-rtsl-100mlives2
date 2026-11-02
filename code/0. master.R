@@ -1,7 +1,7 @@
 rm(list=ls()) 
 
 # setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-# setwd(paste0("C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/GitHub/UW-RTSL-100MLives/"))
+# setwd("C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/100mlives2/uw-rtsl-100mlives2/"))
 
 #libraries
 library(dplyr)
@@ -20,19 +20,19 @@ library(gmodels)
 # For forecasting mortality
 library(forecast)
 
-wd <- "C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/100MLives/Github/UW-RTSL-100MLives/"
+wd <- "C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/100mlives2/uw-rtsl-100mlives2/"
 
 wd_code <- paste0(wd,"code/")
 
 # Raw data not available on GitHub
-wd_raw <- paste0("C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/","100MLives/data/raw/")
+wd_raw <- paste0(wd,"data-raw/")
 
 # Processed data (from base rates and tps)
 wd_data <- paste0(wd,"data/processed/")
 wd_outp <- paste0(wd,"output/")
 
 # Create a temporary directory for the processing data change to wd in final version
-wd_temp <- paste0("C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/","100MLives/data/","temp/")
+wd_temp <- paste0(wd,"temp/")
 if (!dir.exists(wd_temp)) {
   dir.create(wd_temp, recursive = TRUE)
 }
@@ -44,8 +44,6 @@ setwd(wd_code)
 #...........................................................
 
 source("functions_review_6_100.R")
-#source("functions_review_6_dm.R")
-#source("functions_review_6.R")
 
 run_calibration_par <- TRUE # set to TRUE to run parallel calibration
 
@@ -65,8 +63,6 @@ run_CF_trend   <- TRUE
 run_CF_trend_80   <- TRUE
 
 run_CF_trend_ihme  <- FALSE
-
-
 
 # Remove unnecessary dx
 # dx_include <- c("All causes","Ischemic heart disease",
@@ -95,13 +91,13 @@ cause_cols <- names(cause_map)
 #...........................................................
 
 source("1.get_base_population_100.R")
-source("1.get_base_rates_100.R")
+source("1.get_base_rates_100_gbd23.R")
 
 #...........................................................
 # 2. Transition Probabilities-----
 #...........................................................
 
-source("2.get_tps_100.R")
+source("2.get_tps_100_gbd23.R")
 source("2.get_tps_bgmx_100")
 
 #...........................................................
@@ -110,14 +106,14 @@ source("2.get_tps_bgmx_100")
 
 source("3.risk_factors_100.R")
 
+# Compare with fromer GBD estimates used in Kontis et al
+source("3.risk_factors_100_sodium.R")
+
 #...........................................................
 # 4. Interventions-----
 #...........................................................
 
-#source("4.interventions_100.R")
-# load tfa2 statins 2
 source("4.interventions_100_tfa2_statins2.R")
-
 
 #...........................................................
 # 5. Calibration-----

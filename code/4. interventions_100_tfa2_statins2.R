@@ -10,7 +10,12 @@ dt_sodium <- readRDS(file = paste0(wd_data,"Sodium/", "sodium_data.rds"))
 
 # Computing mean intake per location
 
-dt_pop <- readRDS(file = paste0(wd_raw,"GBD/","totalpop_ihme.rds"))
+#dt_pop <- readRDS(file = paste0(wd_raw,"GBD/","totalpop_ihme.rds"))
+dt_pop <- readRDS(file = paste0(wd_raw,"GBD/","totalpop_baseline_ihme.rds"))
+
+
+## charging here because base_rates and pop use UNWPP for population, but GBD uses IHME. 
+#So we need to use the same population source for both sodium and pop data.
 
 # rename locations to match gbd locations (the baseline)
 name_map <- c(
@@ -19,9 +24,9 @@ name_map <- c(
 
 dt_pop[, location := fcoalesce(name_map[location], location)]
 
-dt_pop <- dt_pop[, .(location, year_id, sex_name, age_group_name, val),with=T]
+dt_pop <- dt_pop[, .(location, year, sex, age, val=Nx),with=T]
 
-setnames(dt_pop, c("val", "year_id","sex_name"),
+setnames(dt_pop, c("val", "year","sex"),
          c("population","year","sex"))
 
 age_match<-data.frame(age=20:95)%>%
@@ -42,8 +47,9 @@ age_match<-data.frame(age=20:95)%>%
          age.group = ifelse(age>=90 & age<95, "90 to 94", age.group),
          age.group = ifelse(age==95, "95 plus", age.group))
 
-age_match$age <- as.character(age_match$age)
+#age_match$age <- as.character(age_match$age)
 
+dt_pop[,age_group_name:=age]
 dt_pop[age_group_name == "<1 year", age_group_name := "0"]
 dt_pop[age_group_name == "95 plus", age_group_name := "95"]
 
@@ -1459,121 +1465,3 @@ print(paste0("Number of locations with data: ", length(locs_statins)))
 rm(dt_hbp_control, dt_hbp_control_2020_2023, inc, interpolate_control, name_map)
 
 
-
-
-# inc <- fread(paste0(wd_data,"covfxn2.csv"))
-# 
-# # Fixes location names
-# 
-# name_map <- c(
-#   "Brunei"                            = "Brunei Darussalam",
-#   "Cape Verde"                        = "Cabo Verde",
-#   "Cote d'Ivoire"                     = "Ivory Coast",
-#   "Czech Republic"                    = "Czechia",
-#   "Federated States of Micronesia"    = "Micronesia (Federated States of)",
-#   "Iran"                              = "Iran (Islamic Republic of)",
-#   "Laos"                              = "Lao People's Democratic Republic",
-#   "Macedonia"                         = "North Macedonia",
-#   "Moldova"                           = "Republic of Moldova",
-#   "South Korea"                       = "Republic of Korea",
-#   "Swaziland"                         = "Eswatini",
-#   "Syria"                             = "Syrian Arab Republic",
-#   "The Bahamas"                       = "Bahamas",
-#   "The Gambia"                        = "Gambia",
-#   "Venezuela"                         = "Venezuela (Bolivarian Republic of)",
-#   "Vietnam"                           = "Viet Nam",
-#   "North Korea"                       = "Democratic People's Republic of Korea"
-# )
-# 
-# 
-# inc <- as.data.table(inc)
-# inc[, location := fcoalesce(name_map[location], location)]
-# 
-# ## keep location, year, control for 2024
-# inc <- inc[Year == 2024, .(location, iso3, Year, control)]
-# 
-# #rename location, year
-# setnames(inc, c("location", "Year"), c("location", "year"))
-# 
-# inc[, control_target := 0.5]
-# 
-# interpolate_control <- function(dt_raw,
-#                                 start_year  = 2024L,
-#                                 end_year    = 2050L,
-#                                 current_col = "control",
-#                                 target_col  = "control_target",
-#                                 out_col     = "control_scaled") {
-#   
-#   stopifnot(is.data.table(dt_raw))
-#   
-#   yrs  <- seq.int(start_year, end_year)
-#   span <- end_year - start_year
-#   
-#   dt_out <- dt_raw[, {
-#     
-#     curr <- get(current_col)[1]     # baseline control
-#     tgt  <- get(target_col)[1]      # baseline target
-#     
-#     if (curr > tgt) {
-#       scaled_vals <- rep(0, length(yrs))
-#     } else {
-#       delta <- tgt - curr
-#       scaled_vals <- curr + delta * (yrs - start_year) / span
-#     }
-#     
-#     .(
-#       year          = yrs,
-#       baseline_ctrl = curr,          # preserve baseline value
-#       scaled        = scaled_vals
-#     )
-#     
-#   }, by = .(location)]
-#   
-#   # rename scaled column
-#   setnames(dt_out, "scaled", out_col)
-#   
-#   # reorder columns
-#   setcolorder(dt_out, c("location", "year", "baseline_ctrl", out_col))
-#   
-#   dt_out[]
-# }
-# 
-# 
-# dt_hbp_control <- interpolate_control(
-#   inc,  
-#   start_year  = 2024L,
-#   end_year    = 2050L,
-#   current_col = "control",
-#   target_col  = "control_target",
-#   out_col     = "control_scaled"
-# )
-# 
-# # take only 2024 rows
-# dt_hbp_control_2020_2023 <- dt_hbp_control[year == 2024]
-# 
-# # expand each row into 4 rows (2020–2023)
-# dt_hbp_control_2020_2023 <- dt_hbp_control_2020_2023[
-#   , .(year = 2020:2023,
-#       baseline_ctrl = baseline_ctrl,
-#       control_scaled = baseline_ctrl),
-#   by = .(location)
-# ]
-# 
-# # combine
-# dt_hbp_control <- rbindlist(
-#   list(dt_hbp_control_2020_2023, dt_hbp_control),
-#   use.names = TRUE
-# )[order(location, year)]
-# 
-# # coverage scale up
-# dt_hbp_control[, coverage_scaleup := control_scaled - baseline_ctrl]
-# 
-# # Save the data
-# saveRDS(dt_hbp_control, file = paste0(wd_data,"BloodPressure/", "hbp_control_data.rds"))
-# 
-# #print length(locs_statins)
-# locs_statins <- unique(dt_hbp_control$location)
-# print(paste0("Number of locations with data: ", length(locs_statins)))
-# 
-# #clean
-# rm(dt_hbp_control, dt_hbp_control_2020_2023, inc, interpolate_control, name_map)

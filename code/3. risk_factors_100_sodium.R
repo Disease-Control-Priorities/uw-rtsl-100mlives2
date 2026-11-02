@@ -65,14 +65,15 @@ setnames(dt_sodium_ihme, c("location_name","sex_name","age_group_name"),
          c("location", "sex", "age.group"))
 # Population
 
-dt_pop <- readRDS(file = paste0(wd_raw,"GBD/","totalpop_ihme.rds"))
+#dt_pop <- readRDS(file = paste0(wd_raw,"GBD/","totalpop_ihme.rds"))
+dt_pop <- readRDS(file = paste0(wd_raw,"GBD/","totalpop_baseline_ihme.rds"))
 
 dt_pop[, location := fcoalesce(name_map[location], location)]
 
-dt_pop <- dt_pop[, .(location, year_id, sex_name, age_group_name, val),with=T]
-
-setnames(dt_pop, c("val", "year_id","sex_name"),
-         c("population","year","sex"))
+# dt_pop <- dt_pop[, .(location, year, sex, age_group, val),with=T]
+# 
+# setnames(dt_pop, c("val", "year_id","sex_name"),
+#          c("population","year","sex"))
 
 age_match<-data.frame(age=20:95)%>%
   mutate(age.group = ifelse(age<25, "20 to 24", NA),
@@ -92,15 +93,15 @@ age_match<-data.frame(age=20:95)%>%
          age.group = ifelse(age>=90 & age<95, "90 to 94", age.group),
          age.group = ifelse(age==95, "95 plus", age.group))
 
-age_match$age <- as.character(age_match$age)
+#age_match$age <- as.character(age_match$age)
 
-dt_pop[age_group_name == "<1 year", age_group_name := "0"]
-dt_pop[age_group_name == "95 plus", age_group_name := "95"]
+# dt_pop[age_group_name == "<1 year", age_group_name := "0"]
+# dt_pop[age_group_name == "95 plus", age_group_name := "95"]
 
-dt_pop <- merge(dt_pop, age_match, by.x = "age_group_name", by.y = "age", all.x = TRUE)
+dt_pop <- merge(dt_pop, age_match, by.x = "age", by.y = "age", all.x = TRUE)
 
 # Average population by age group (not year because POp comes up to 2019)
-dt_pop <- dt_pop[year==2017,list(population=mean(population)),by=list(location,sex,age.group)]
+dt_pop <- dt_pop[year==2017,list(population=mean(Nx)),by=list(location,sex,age.group)]
 
 # Merge population data with sodium data
 dt_sodium <- merge(dt_sodium_ihme,dt_pop,
@@ -124,7 +125,7 @@ library(data.table)
 library(rvest)
 
 # 1. Load the XML file
-doc <- read_xml("C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/100MLives/data/raw/Sodium/10.1136_bmjopen-2013-003733.xml")
+doc <- read_xml(paste0(wd_raw,"Sodium/10.1136_bmjopen-2013-003733.xml"))
 
 # 2. Find all table-wraps
 tables <- xml_find_all(doc, ".//table-wrap")
@@ -178,3 +179,4 @@ dt[location=="USA", location := "United States"]
 
 dt$location_clean <- NULL
 fwrite(dt,file=paste0(wd_raw,"dt_sodium_powles_2013.csv"))
+

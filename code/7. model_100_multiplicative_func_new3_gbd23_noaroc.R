@@ -2329,7 +2329,7 @@ adherence_cf <- 0.664
 
 # 2. Detect and start cluster
 #ncores <- max(1, parallel::detectCores() - 1)
-ncores <- 6
+ncores <- 8
 cl <- makeCluster(ncores)
 registerDoParallel(cl)
 
