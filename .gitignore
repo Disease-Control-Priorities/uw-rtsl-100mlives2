@@ -12,3 +12,7 @@ temp/**/*.*
 
 .Rproj.user
 .claude/
+
+output/uncertainty/**/*
+!output/uncertainty/**/
+!output/uncertainty/**/*.md

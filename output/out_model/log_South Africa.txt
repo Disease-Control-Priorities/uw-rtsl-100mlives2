@@ -1,7 +1,7 @@
 
 ==============================
 Running location: South Africa 
-Time: 2026-01-31 09:46:16.746964 
+Time: 2026-11-02 20:03:24.770344 
 ==============================
 
 ##########################################
@@ -273,4 +273,4 @@ Projecting from 2017 to 2058...
 === Projection Complete ===
 Final intervention label: BP + Salt + TFA + Statins 
 
-Successfully saved output to: C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/100MLives/Github/UW-RTSL-100MLives/output//out_model/model_output_part_South Africa.rds 
+Successfully saved output to: C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/100mlives2/uw-rtsl-100mlives2/output//out_model/model_output_part_South Africa.rds 

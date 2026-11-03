@@ -1,0 +1,40 @@
+
+
+write a prompt to ask claude code to:
+
+Goal: Update the manuscript markdown to have a fully reproducible manuscript
+
+context: review reports/UWRTSL-100MLivesRMD_Output.Rmd which already produce some of the artifacts
+
+review reports/UWRTSL-100MLivesRMD_Output.Rmd and manuscript/manuscript-100mlives2.xlsx
+
+Restriction. Only create artifacts (figures,tables, scalars) currently used in the manuscript, no addintional ones.
+
+Task: create a manuscript/manuscript-100mlives2-artifacts.Rmd to make all the reuquired calculations and figure and tables creation. 
+this file will be the stand alone mandatory source for reproduce manuscript numbers
+manuscript/manuscript-100mlives2.Rmd do not make calculations
+
+use R data.table and ggplot. save needed artifacts in manuscript/artifacts/. prioritaize creating .rds artifacts to store files
+and avoid creating large files since the manuscript folder is tracked on github   
+
+place the figures in manuscript/figures/ and tables in manuscript manuscript/tables/ . 
+
+save every table as .csv
+for figures create .png
+
+Also manuscript/manuscript/manuscript-100mlives2.Rmd create manuscript/manuscript-100mlives2.xlsx for trackability
+
+modify only manuscript/manuscript-100mlives2.Rmd
+and the created manuscript/manuscript-100mlives2-artifacts.Rmd, no other files
+
+in manuscript/manuscript-100mlives2.Rmd code put commented lines of pending numebers to update to have the fully reproducible manuscript, since currently some element cannot be reproduced
+from existing inputs/ouputs. e.g. sensitivity analysis, so keep those as currently in manuscript/manuscript-100mlives2.Rmd 
+
+export the prompt as a .md file
+
+
+
+
+#########################################
+#########################################
+

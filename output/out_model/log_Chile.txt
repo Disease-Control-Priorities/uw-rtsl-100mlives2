@@ -1,7 +1,7 @@
 
 ==============================
 Running location: Chile 
-Time: 2026-01-31 09:33:12.138897 
+Time: 2026-11-02 19:52:04.821747 
 ==============================
 
 ##########################################
@@ -273,4 +273,4 @@ Projecting from 2017 to 2058...
 === Projection Complete ===
 Final intervention label: BP + Salt + TFA + Statins 
 
-Successfully saved output to: C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/100MLives/Github/UW-RTSL-100MLives/output//out_model/model_output_part_Chile.rds 
+Successfully saved output to: C:/Users/wrgar/OneDrive - UW/02Work/ResolveToSaveLives/100mlives2/uw-rtsl-100mlives2/output//out_model/model_output_part_Chile.rds 
