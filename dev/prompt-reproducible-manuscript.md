@@ -11,6 +11,7 @@ Some results cannot be recalculated yet, such as the sensitivity analyses. Keep 
 ## Files to read first
 
 - `manuscript/manuscript-100mlives2.Rmd` lists everything the manuscript and supplement use. Treat it as the authoritative inventory.
+- `code/7. model_100_multiplicative_func_new3_gbd23_noaroc.R/` contains the model logic and the country-level outputs. Read it to understand how the outputs were generated.
 - `reports/UWRTSL-100MLivesRMD_Output.Rmd` holds the existing analysis and reporting logic and already makes many of the artifacts. Do not edit it.
 - `manuscript/manuscript-100mlives2.xlsx` is the current tracker. It has an `Index` sheet, one sheet per table (`T1_Scenarios`, `T2_DeathsDelayed`, `TS1_Regions` … `TS9_Assumptions`) and a `Figures` sheet that maps each figure panel to its file. Each table sheet has a title in row 1, headers in row 3, data from row 4, then a blank row and a "Notes:" row. Read every sheet, including the titles and notes.
 

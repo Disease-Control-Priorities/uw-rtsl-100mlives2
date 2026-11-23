@@ -1,0 +1,1911 @@
+---
+title: "100M Lives manuscript artifacts"
+subtitle: "Every manuscript-specific number, table and figure, built from existing inputs and model outputs"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+<!--
+reports/manuscript-100mlives2-artifacts.Rmd
+
+This file is the only executable source for manuscript-specific calculations, summaries, tables and figures.
+It reads existing project inputs and the stage-7 model outputs (it never reruns the model) and writes:
+  manuscript/artifacts/*.rds              scalars, display-ready tables, compact plot data, provenance
+  manuscript/tables/*.csv                 every table the manuscript uses (numeric values + status column)
+  manuscript/figures/*.png                every reproducible figure panel
+  manuscript/manuscript-100mlives2.xlsx   tracking workbook, regenerated (tracking and review only)
+
+Run it in a fresh R process from the repository root (knit output goes to a temporary directory):
+  Rscript -e 'rmarkdown::render("reports/manuscript-100mlives2-artifacts.Rmd", output_dir = tempdir())'
+then knit manuscript/manuscript-100mlives2.Rmd, which only loads these artifacts.
+
+Rules followed here: data.table for data work and ggplot2 for figures; no tidyverse; no setwd(); all
+paths are built from the repository root; the generated workbook and earlier artifact builds are never
+read as inputs; results that cannot be recalculated yet keep their legacy values and are tagged
+REPRO_PENDING (search for that tag here and in the manuscript).
+-->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, comment = NA)
+options(width = 160, datatable.print.nrows = 200)
+
+req_pkgs <- c("data.table", "ggplot2", "rprojroot", "openxlsx", "sf", "rnaturalearth",
+              "rnaturalearthdata", "ggbeeswarm", "ggdist", "scales", "knitr")
+miss_pkgs <- req_pkgs[!vapply(req_pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(miss_pkgs)) stop("Install these R packages before knitting: ", paste(miss_pkgs, collapse = ", "))
+library(data.table)
+library(ggplot2)
+
+# ---- Paths: built from the repository root, so this knits from the root, reports/ or manuscript/ ----
+root <- rprojroot::find_root(rprojroot::has_file("uw-rtsl-100mlives2.Rproj"))
+rp <- function(...) file.path(root, ...)
+dir_art  <- rp("manuscript", "artifacts")
+dir_tab  <- rp("manuscript", "tables")
+dir_fig  <- rp("manuscript", "figures")
+xlsx_out <- rp("manuscript", "manuscript-100mlives2.xlsx")
+for (d in c(dir_art, dir_tab, dir_fig)) dir.create(d, showWarnings = FALSE, recursive = TRUE)
+
+# ---- Analysis window ----------------------------------------------------------------------------
+yr_impl_start <- 2026L                        # first intervention year (checked against the model code)
+yr_end        <- 2050L
+n_impl_years  <- yr_end - yr_impl_start + 1L  # 25 = divisor for every "per year" average (2026-2050)
+# Cumulative BAU/projected totals and % reductions sum years yr_cum_start-2050: the stated 2026-2050
+# horizon (authors' decision, 2026-11-03). The report and the legacy values used 2025-2050
+# (data.out[year >= 2025]); deaths delayed are zero in 2025 (checked below), so only BAU totals,
+# projected totals and percentages differ from the legacy values.
+yr_cum_start  <- 2026L
+win_cum       <- yr_cum_start:yr_end
+# Table S8 keeps the legacy 2025-2050 window in every row: its alternative-trend rows cannot be
+# recomputed, and mixing windows inside one table would make the scenarios incomparable.
+yr_s8_start   <- 2025L
+yr_obs_end     <- 2018L                       # last calibration year plotted (report: b_rates[year < 2019])
+yr_model_start <- 2019L                       # first projection year plotted from the model outputs
+
+# ---- Intervention labels (report chunk `output-data`) --------------------------------------------
+int_raw <- c(baseline = "BAU", BP = "HTN", Salt = "Sodium", TFA = "TFA", Statins = "Statins",
+             "BP + Salt + TFA + Statins" = "All")
+scen_of_int <- c(baseline = "baseline", BP = "bp_only", Salt = "sodium_only", TFA = "tfa_only",
+                 Statins = "statins_only", "BP + Salt" = "bp_sodium", "BP + Salt + TFA" = "bp_sodium_tfa",
+                 "BP + Salt + TFA + Statins" = "all_four")   # "BP + Salt" and "BP + Salt + TFA" are not reported
+int_label <- c(BAU = "Business-as-Usual", HTN = "Improved Hypertension Control",
+               Sodium = "Population Sodium Reduction", TFA = "TFA Elimination",
+               Statins = "Improved Statin Uptake", All = "All Interventions")
+int_single <- c("HTN", "Sodium", "TFA", "Statins")
+int_table  <- c("All", int_single)
+
+# ---- Causes (the four modelled CVD causes; there is no pre-aggregated "all" cause in the outputs) ----
+cause_map <- c(ihd = "Ischemic heart disease", istroke = "Ischemic stroke",
+               hstroke = "Intracerebral hemorrhage", hhd = "Hypertensive heart disease")
+
+# ---- Age groups (report chunk `output-data`: cut at 70, 80, 90, right-open) ----------------------
+age_levels   <- c("<70", "70-79", "80-89", "90+")
+age_group_of <- function(age) fcase(age < 70, "<70", age < 80, "70-79", age < 90, "80-89", default = "90+")
+
+# ---- Regions (report chunk `transversals`): World Bank names -> model names, plus missing countries --
+region_name_fix <- c(
+  "United States of America" = "United States", "Egypt, Arab Rep." = "Egypt",
+  "Congo, Dem. Rep." = "Democratic Republic of the Congo", "Congo, Rep." = "Congo",
+  "Yemen, Rep." = "Yemen", "Slovak Republic" = "Slovakia",
+  "Venezuela, RB" = "Venezuela (Bolivarian Republic of)", "Vietnam" = "Viet Nam",
+  "Cote d'Ivoire" = "Ivory Coast", "Korea, Rep." = "Republic of Korea",
+  "Iran, Islamic Rep." = "Iran (Islamic Republic of)", "Czech Republic" = "Czechia",
+  "Bahamas, The" = "Bahamas", "Gambia, The" = "Gambia", "Lao PDR" = "Lao People's Democratic Republic",
+  "Moldova" = "Republic of Moldova", "Micronesia, Fed. Sts." = "Micronesia (Federated States of)")
+region_add <- data.table(
+  iso3     = c("LCA", "PRK", "VCT", "KGZ", "PSE", "TWN"),
+  location = c("Saint Lucia", "Democratic People's Republic of Korea", "Saint Vincent and the Grenadines",
+               "Kyrgyzstan", "Palestine", "Taiwan (Province of China)"),
+  region   = c("Latin America and Caribbean", "Southeast Asia, East Asia, and Oceania",
+               "Latin America and Caribbean", "Central Europe, Eastern Europe, and Central Asia",
+               "North Africa and Middle East", "Southeast Asia, East Asia, and Oceania"))
+region_abbr <- c(ssa = "Sub-Saharan Africa", seao = "Southeast Asia, East Asia, and Oceania",
+                 sa = "South Asia", lac = "Latin America and Caribbean",
+                 cee = "Central Europe, Eastern Europe, and Central Asia",
+                 name = "North Africa and Middle East", hi = "High-income")
+
+# ---- Excluded locations (report: locs_exclude <- NULL; Greenland and Bermuda were never run) -------
+locs_exclude <- character(0)
+
+# ---- Standard population (report chunk `funct`) ------------------------------------------------
+# These 10-year step weights (0.013 ... 0.001, truncated to 20-95+ and renormalised) are what the report
+# used. They are not the WHO World Standard Population 2000-2025 (e.g. ages 80-89 get 3.4% of the all-age
+# weight here vs 1.35% in the WHO standard), so the ASMR figures (Fig S3, Fig S4a) are not regenerated.
+# Kept only to document the gap; nothing below uses them.
+who_std_report <- data.table(age = 20:95, weight = c(rep(0.013, 10), rep(0.012, 10), rep(0.011, 10),
+                                                     rep(0.009, 10), rep(0.007, 10), rep(0.005, 10),
+                                                     rep(0.003, 10), rep(0.001, 5), 0.001 * 5 + 0.001))
+who_std_report[, weight := weight / sum(weight)]
+
+# ---- Helpers -----------------------------------------------------------------------------------
+check <- function(cond, msg) if (!isTRUE(cond)) stop("Check failed: ", msg, call. = FALSE)
+need_files <- function(paths) {
+  miss <- paths[!file.exists(paths)]
+  if (length(miss)) stop("Missing input files:\n  ", paste(miss, collapse = "\n  "), call. = FALSE)
+}
+need_cols <- function(dt, cols, what) {
+  miss <- setdiff(cols, names(dt))
+  if (length(miss)) stop(what, ": missing columns ", paste(miss, collapse = ", "), call. = FALSE)
+}
+fmt_num <- function(x, d = 1) ifelse(is.na(x), "—", formatC(x, format = "f", digits = d, big.mark = ","))
+fmt_int <- function(x) ifelse(is.na(x), "—", formatC(round(x), format = "d", big.mark = ","))
+fmt_pct <- function(x, d = 1) ifelse(is.na(x), "—", paste0(formatC(100 * x, format = "f", digits = d), "%"))
+num_word <- function(n) c("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")[n]
+blank_repeats <- function(x) { x[c(FALSE, x[-1] == x[-length(x)])] <- ""; x }
+esc_md <- function(x) gsub("([*_])", "\\\\\\1", x)
+# single-row lookup in a summary table, e.g. g(s_int, "dd", int = "All")
+g <- function(tab, col, ...) {
+  f <- list(...)
+  keep <- rep(TRUE, nrow(tab))
+  for (n in names(f)) keep <- keep & tab[[n]] == f[[n]]
+  check(sum(keep) == 1, sprintf("lookup %s in %s is not unique", col,
+                                paste(names(f), unlist(f), sep = "=", collapse = ", ")))
+  tab[[col]][keep]
+}
+save_rds <- function(obj, name) saveRDS(obj, file.path(dir_art, name), compress = "xz")
+save_fig <- function(plot, name, width, height, dpi = 150) {
+  ggsave(file.path(dir_fig, name), plot, width = width, height = height, dpi = dpi, bg = "white")
+  FIG_DONE[[name]] <<- TRUE
+}
+FIG_DONE <- list()
+```
+
+# 1. Inventory
+
+Every manuscript-specific number, table and figure, in manuscript order. Status values:
+`reproduced` (calculated here from repo inputs/outputs), `fixed_external` (published literature,
+hard-coded with citation), `static_content` (author-written text) and `preserved_pending` (a model
+result that cannot be recalculated yet; legacy value kept and tagged `REPRO_PENDING`). Tables that
+combine statuses are `mixed`; their cell-level status is in the CSV `status` column and in the workbook
+shading. `legacy` is the value currently displayed in the manuscript/workbook: it is the kept value for
+non-reproduced items and the comparison baseline for reproduced ones. Input codes are defined in the
+legend that follows. `W` is the cumulative window `yr_cum_start`-2050, i.e. 2026-2050 (setup chunk).
+
+```{r inventory}
+inv_txt <- "
+id|type|location|status|unit|legacy|inputs|filters|method|chunk|output|pending
+n_countries|scalar|Abstract (Methods); Methods: Data sources|reproduced|count|190|MO:location|all model output files|number of locations with a model output file|output-data|artifacts/scalars.rds|
+pop_coverage_pct|scalar|Abstract (Methods); Methods: Data sources|reproduced|% (floor)|99|POP:location,year_id,age,Nx; MO:location|UN-WPP 2019, ages 20+; denominator = all locations in POP|100 x adult population of modelled countries / all locations, floored (lower-bound wording)|output-data|artifacts/scalars.rds|
+scenario_targets|scalar|Abstract (Methods); Methods; Table 1 Target|static_content|text|start 2026; HTN control 50% by 2040; sodium -30% by 2030; TFA 0%E by 2028; statins 60% by 2050|MS; MC|scenario design|author-written; checked against model-code constants (section 20)|-|artifacts/scalars.rds|
+dd_all_total_M|scalar|Abstract (Results); Results p1; Comparison p2|reproduced|million|118.1|MO:dead|All vs BAU; W; 4 causes; ages 20-95; 190 countries|sum over strata of BAU minus All deaths|out-tab-int-caut|artifacts/scalars.rds|
+dd_all_total_M_r0|scalar|Discussion p1; Conclusion|reproduced|million|118|MO:dead|as dd_all_total_M|0 decimals|out-tab-int-caut|artifacts/scalars.rds|
+dd_all_pct|scalar|Abstract (Results); Results p1; Discussion p1|reproduced|%|17.0|MO:dead|All vs BAU; W|deaths delayed / BAU deaths|out-tab-int-caut|artifacts/scalars.rds|
+dd_all_pct_r0|scalar|Conclusion|reproduced|%|17|MO:dead|as dd_all_pct|0 decimals|out-tab-int-caut|artifacts/scalars.rds|
+dd_all_per_year_M_1d|scalar|Abstract (Results); Discussion p1|reproduced|million/year|4.7|MO:dead|All vs BAU; 2026-2050|deaths delayed / 25 implementation years|out-tab-int-caut|artifacts/scalars.rds|
+dd_all_per_year_M_2d|scalar|Results p1|reproduced|million/year|4.72|MO:dead|as above|2 decimals|out-tab-int-caut|artifacts/scalars.rds|
+bau_total_M|scalar|Results p1|reproduced|million|696.2|MO:dead|BAU; W; 4 causes|sum of BAU deaths|out-tab-int-caut|artifacts/scalars.rds|
+proj_all_total_M|scalar|Results p1|reproduced|million|578.1|MO:dead|All; W|BAU minus deaths delayed|out-tab-int-caut|artifacts/scalars.rds|
+dd_ihd_all_M|scalar|Abstract (Results); Results p1|reproduced|million|42.3|MO:dead,cause|All vs BAU; W; IHD|by cause|out-tab-int-cau|artifacts/scalars.rds|
+pct_ihd_all|scalar|Results p1|reproduced|%|12.4|MO:dead,cause|All vs BAU; W; IHD|deaths delayed / BAU deaths|out-tab-int-cau|artifacts/scalars.rds|
+dd_istroke_all_M|scalar|Abstract (Results); Results p1|reproduced|million|21.7|MO:dead,cause|All vs BAU; W; ischemic stroke|by cause|out-tab-int-cau|artifacts/scalars.rds|
+pct_istroke_all|scalar|Results p1|reproduced|%|14.5|MO:dead,cause|as above|DD/BAU|out-tab-int-cau|artifacts/scalars.rds|
+dd_hstroke_all_M|scalar|Abstract (Results); Results p1|reproduced|million|45.0|MO:dead,cause|All vs BAU; W; ICH|by cause|out-tab-int-cau|artifacts/scalars.rds|
+pct_hstroke_all|scalar|Abstract (Results); Results p1|reproduced|%|32.9|MO:dead,cause|as above|DD/BAU|out-tab-int-cau|artifacts/scalars.rds|
+dd_hhd_all_M|scalar|Results p1|reproduced|million|9.0|MO:dead,cause|All vs BAU; W; HHD|by cause|out-tab-int-cau|artifacts/scalars.rds|
+pct_hhd_all|scalar|Results p1|reproduced|%|13.5|MO:dead,cause|as above|DD/BAU|out-tab-int-cau|artifacts/scalars.rds|
+dd_stroke_all_M|scalar|Abstract (Results)|reproduced|million|66.7|MO:dead,cause|All vs BAU; W; ischemic stroke + ICH|sum of the two stroke causes at full precision|out-tab-int-cau|artifacts/scalars.rds|
+share_ihd_stroke_pct|scalar|Abstract (Results)|reproduced|%|92|MO:dead,cause|All vs BAU; W|(IHD + ischemic stroke + ICH) / all deaths delayed|out-tab-int-cau|artifacts/scalars.rds|
+dd_htn_total_M|scalar|Abstract (Results); Results HTN; Discussion p4; Comparison HTN|reproduced|million|74.4|MO:dead|HTN vs BAU; W|sum of deaths delayed|out-tab-int-caut|artifacts/scalars.rds|
+dd_htn_total_M_r0|scalar|Comparison Statins|reproduced|million|74|MO:dead|as above|0 decimals|out-tab-int-caut|artifacts/scalars.rds|
+dd_sodium_total_M|scalar|Abstract (Results); Results sodium|reproduced|million|36.3|MO:dead|Sodium vs BAU; W|sum of deaths delayed|out-tab-int-caut|artifacts/scalars.rds|
+dd_statins_total_M|scalar|Abstract (Results); Results statins|reproduced|million|10.9|MO:dead|Statins vs BAU; W|sum of deaths delayed|out-tab-int-caut|artifacts/scalars.rds|
+dd_statins_total_M_r0|scalar|Comparison Statins|reproduced|million|11|MO:dead|as above|0 decimals|out-tab-int-caut|artifacts/scalars.rds|
+dd_tfa_total_M|scalar|Abstract (Results); Results TFA|reproduced|million|4.5|MO:dead|TFA vs BAU; W|sum of deaths delayed|out-tab-int-caut|artifacts/scalars.rds|
+pct_all_sex_common_r0|scalar|Abstract (Results)|reproduced|%|17|MO:dead,sex|All vs BAU; W; by sex|female and male DD/BAU: one value when both round alike, otherwise a low-high range|1out-int-age (dt_out_sex)|artifacts/scalars.rds|
+pct_all_u70_r0|scalar|Abstract (Results); Results p2|reproduced|%|20|MO:dead,age|All vs BAU; W; ages 20-69|DD/BAU|1out-int-age (dt_out_age)|artifacts/scalars.rds|
+pct_all_o70_r0|scalar|Abstract (Results); Results p2|reproduced|%|16|MO:dead,age|All vs BAU; W; ages 70-95|DD/BAU|1out-int-age (dt_out_age)|artifacts/scalars.rds|
+one_in_n_all|scalar|Abstract (Conclusion)|reproduced|word|six|MO:dead|All vs BAU; W; all ages|round(1 / dd_all_pct) as a word (text calls it premature but the estimand is all-age)|out-tab-int-caut|artifacts/scalars.rds|
+pct_all_female_r0|scalar|Results p2|reproduced|%|17|MO:dead,sex|All vs BAU; W; women, all ages|DD/BAU|1out-int-age (dt_out_sex)|artifacts/scalars.rds|
+dd_all_female_M|scalar|Results p2|reproduced|million|61.1|MO:dead,sex|All vs BAU; W; women, all ages|sum of deaths delayed|1out-int-age (dt_out_sex)|artifacts/scalars.rds|
+pct_all_male_r0|scalar|Results p2|reproduced|%|17|MO:dead,sex|All vs BAU; W; men, all ages|DD/BAU|1out-int-age (dt_out_sex)|artifacts/scalars.rds|
+dd_all_male_M|scalar|Results p2|reproduced|million|57.0|MO:dead,sex|All vs BAU; W; men, all ages|sum of deaths delayed|1out-int-age (dt_out_sex)|artifacts/scalars.rds|
+dd_all_u70_M|scalar|Results p2|reproduced|million|34.8|MO:dead,age|All vs BAU; W; ages 20-69|sum of deaths delayed|1out-int-age (dt_out_age)|artifacts/scalars.rds|
+dd_all_o70_M|scalar|Results p2|reproduced|million|83.3|MO:dead,age|All vs BAU; W; ages 70-95|sum of deaths delayed|1out-int-age (dt_out_age)|artifacts/scalars.rds|
+pct_all_reg_ssa|scalar|Results p2|reproduced|%|23|MO:dead; CG:Super_region|All vs BAU; W; Sub-Saharan Africa|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_all_reg_seao|scalar|Results p2|reproduced|%|21|MO:dead; CG:Super_region|All vs BAU; W; SE Asia, E Asia, Oceania|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_all_reg_sa|scalar|Results p2|reproduced|%|17|MO:dead; CG:Super_region|All vs BAU; W; South Asia|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_all_reg_lac|scalar|Results p2|reproduced|%|13|MO:dead; CG:Super_region|All vs BAU; W; Latin America and Caribbean|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_all_reg_cee|scalar|Results p2|reproduced|%|13|MO:dead; CG:Super_region|All vs BAU; W; Central/Eastern Europe, Central Asia|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_all_reg_name|scalar|Results p2|reproduced|%|12|MO:dead; CG:Super_region|All vs BAU; W; North Africa and Middle East|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_htn|scalar|Results HTN|reproduced|%|10.7|MO:dead|HTN vs BAU; W; all ages (text says premature)|DD/BAU|out-tab-int-caut|artifacts/scalars.rds|
+dd_htn_per_year_M_1d|scalar|Results HTN|reproduced|million/year|3.0|MO:dead|HTN vs BAU; 2026-2050|DD / 25|out-tab-int-caut|artifacts/scalars.rds|
+dd_htn_hstroke_M|scalar|Results HTN|reproduced|million|30.2|MO:dead,cause|HTN vs BAU; W; ICH|by cause|out-tab-int-cau|artifacts/scalars.rds|
+dd_htn_ihd_M|scalar|Results HTN|reproduced|million|21.5|MO:dead,cause|HTN vs BAU; W; IHD|by cause|out-tab-int-cau|artifacts/scalars.rds|
+dd_htn_istroke_M|scalar|Results HTN|reproduced|million|16.0|MO:dead,cause|HTN vs BAU; W; ischemic stroke|by cause|out-tab-int-cau|artifacts/scalars.rds|
+dd_htn_hhd_M|scalar|Results HTN|reproduced|million|6.8|MO:dead,cause|HTN vs BAU; W; HHD|by cause|out-tab-int-cau|artifacts/scalars.rds|
+pct_htn_reg_ssa|scalar|Results HTN|reproduced|%|17|MO:dead; CG:Super_region|HTN vs BAU; W; Sub-Saharan Africa|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_htn_reg_seao|scalar|Results HTN|reproduced|%|13|MO:dead; CG:Super_region|HTN vs BAU; W; SE Asia, E Asia, Oceania|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_htn_reg_sa|scalar|Results HTN|reproduced|%|11|MO:dead; CG:Super_region|HTN vs BAU; W; South Asia|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+dd_sodium_per_year_M_1d|scalar|Results sodium|reproduced|million/year|1.5|MO:dead|Sodium vs BAU; 2026-2050|DD / 25|out-tab-int-caut|artifacts/scalars.rds|
+pct_sodium|scalar|Results sodium|reproduced|%|5.2|MO:dead|Sodium vs BAU; W; all ages (text says premature)|DD/BAU|out-tab-int-caut|artifacts/scalars.rds|
+dd_sodium_ihd_M|scalar|Results sodium|reproduced|million|7.0|MO:dead,cause|Sodium vs BAU; W; IHD|by cause|out-tab-int-cau|artifacts/scalars.rds|
+dd_sodium_istroke_M|scalar|Results sodium|reproduced|million|6.0|MO:dead,cause|Sodium vs BAU; W; ischemic stroke|by cause|out-tab-int-cau|artifacts/scalars.rds|
+pct_sodium_reg_seao|scalar|Results sodium|reproduced|%|7|MO:dead; CG:Super_region|Sodium vs BAU; W; SE Asia, E Asia, Oceania|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_sodium_reg_sa|scalar|Results sodium|reproduced|%|5|MO:dead; CG:Super_region|Sodium vs BAU; W; South Asia|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_sodium_reg_other_range|scalar|Results sodium|reproduced|% range|1–6|MO:dead; CG:Super_region|Sodium vs BAU; W; the other five regions|floor(min) to ceiling(max) of DD/BAU across the other five regions|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+dd_tfa_per_year_k|scalar|Results TFA|reproduced|deaths/year|190,000|MO:dead|TFA vs BAU; 2026-2050|DD / 25, rounded to the nearest 10,000|out-tab-int-caut|artifacts/scalars.rds|
+pct_tfa|scalar|Results TFA; Discussion p4 (global average)|reproduced|%|0.6|MO:dead|TFA vs BAU; W; all ages (text says premature)|DD/BAU (legacy: 0.6 in Results, 0.7 in Discussion)|out-tab-int-caut|artifacts/scalars.rds|
+pct_tfa_u70_r0|scalar|Results TFA|reproduced|%|1|MO:dead,age|TFA vs BAU; W; ages 20-69|DD/BAU|1out-int-age (dt_out_age)|artifacts/scalars.rds|
+pct_tfa_o70_range|scalar|Results TFA|preserved_pending|% range|0.3 -0.5|MO:dead,age|TFA vs BAU; W; older adults|not identified: 70-79/80-89/90+ give 0.7/0.5/0.3% and ages 70+ pooled give 0.5%|1out-int-age (dt_out_age)|artifacts/scalars.rds|estimand for the older-adult range is ambiguous
+pct_tfa_reg_sa|scalar|Results TFA|preserved_pending|%|1|MO:dead; CG:Super_region|TFA vs BAU; W; South Asia|South Asia gives 0.3%; the largest region is SE Asia, E Asia, Oceania (1.0%), which matches the displayed 1%|out-tab-loc (dt_out_region)|artifacts/scalars.rds|region named in the text does not match the value; author decision
+dd_statins_per_year_k|scalar|Results statins|reproduced|deaths/year|440,000|MO:dead|Statins vs BAU; 2026-2050|DD / 25, rounded to the nearest 10,000|out-tab-int-caut|artifacts/scalars.rds|
+pct_statins|scalar|Results statins|reproduced|%|1.6|MO:dead|Statins vs BAU; W|DD/BAU|out-tab-int-caut|artifacts/scalars.rds|
+dd_statins_ihd_M|scalar|Results statins|reproduced|million|10.6|MO:dead,cause|Statins vs BAU; W; IHD|by cause|out-tab-int-cau|artifacts/scalars.rds|
+pct_statins_ihd|scalar|Results statins|reproduced|%|3.1|MO:dead,cause|Statins vs BAU; W; IHD|DD/BAU|out-tab-int-cau|artifacts/scalars.rds|
+dd_statins_istroke_M|scalar|Results statins|reproduced|million|0.7|MO:dead,cause|Statins vs BAU; W; ischemic stroke|by cause|out-tab-int-cau|artifacts/scalars.rds|
+pct_statins_istroke|scalar|Results statins|reproduced|%|0.5|MO:dead,cause|Statins vs BAU; W; ischemic stroke|DD/BAU|out-tab-int-cau|artifacts/scalars.rds|
+pct_statins_u70|scalar|Results statins|reproduced|%|1.7|MO:dead,age|Statins vs BAU; W; ages 20-69|DD/BAU|1out-int-age (dt_out_age)|artifacts/scalars.rds|
+pct_statins_o70|scalar|Results statins|reproduced|%|1.5|MO:dead,age|Statins vs BAU; W; ages 70-95|DD/BAU|1out-int-age (dt_out_age)|artifacts/scalars.rds|
+pct_statins_reg_lac|scalar|Results statins|reproduced|%|2|MO:dead; CG:Super_region|Statins vs BAU; W; Latin America and Caribbean|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_statins_reg_name|scalar|Results statins|reproduced|%|1.7|MO:dead; CG:Super_region|Statins vs BAU; W; North Africa and Middle East|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_statins_reg_sa|scalar|Results statins|reproduced|%|1.6|MO:dead; CG:Super_region|Statins vs BAU; W; South Asia|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+pct_statins_reg_hi|scalar|Results statins|reproduced|%|1.3|MO:dead; CG:Super_region|Statins vs BAU; W; High-income|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
+sens_no_trend_dd_M|scalar|Results: Sensitivity analysis|preserved_pending|million|116|TS8 legacy|no background and no CVD trend; All|legacy Table S8|none in report|artifacts/scalars.rds|alternative-trend simulation outputs
+sens_lc_dd_M|scalar|Results: Sensitivity analysis|preserved_pending|million|117|TS8 legacy|LC trends; All|legacy Table S8|none in report|artifacts/scalars.rds|alternative-trend simulation outputs
+sens_foresight_dd_M|scalar|Results: Sensitivity analysis|preserved_pending|million|102|TS8 legacy|Foresight trends; All|legacy Table S8|none in report|artifacts/scalars.rds|alternative-trend simulation outputs
+sens_pct_range|scalar|Results: Sensitivity analysis|preserved_pending|% range|17%-18%|TS8 legacy|all trend scenarios; All|legacy Table S8|none in report|artifacts/scalars.rds|alternative-trend simulation outputs
+htn_2040_vs_2050_gain_M|scalar|Discussion p2|preserved_pending|million|16.5|none|HTN target reached in 2040 vs 2050|difference between two HTN runs|none in report|artifacts/scalars.rds|HTN run with control_target_year = 2050
+tfa_india_ban_word|scalar|Discussion p3|preserved_pending|million (word)|four|none|India TFA ban counterfactual|not in outputs|none in report|artifacts/scalars.rds|TFA run without India's 2021 limit
+sodium_china_current_g|scalar|Discussion p3|reproduced|g/day|7.04|SOD:location,year,sodium_current|China, 2025 baseline|lookup, 2 decimals|out-policy-salt|artifacts/scalars.rds|
+sodium_china_prev_g|scalar|Discussion p3|reproduced|g/day|4.83|POW:location,sodium_powles_2010|China, GBD 2010 (Powles 2013; input of Kontis and Pickersgill)|lookup, 2 decimals|out-policy-salt (Powles comparison)|artifacts/scalars.rds|
+sodium_china_share_pct|scalar|Discussion p3; Comparison sodium|reproduced|%|40|MO:dead,location|Sodium vs BAU; W; China / all 190 countries|share of global sodium deaths delayed|out-tab-loc|artifacts/scalars.rds|
+pick_htn_text_M|scalar|Discussion p4|fixed_external|million|76|LIT: Pickersgill 2022|HTN|quoted|-|artifacts/scalars.rds|
+tfa_ihd_high_regions_pct|scalar|Discussion p4|preserved_pending|%|1|MO:dead,cause|TFA; high-consumption regions; IHD|estimand not identified (regional TFA IHD reductions range 0.5-2.4%)|none in report|artifacts/scalars.rds|define the region set and cause
+one_in_n_u70|scalar|Discussion p5|reproduced|word|five|MO:dead,age|All vs BAU; W; ages 20-69|round(1 / pct_all_u70) as a word|1out-int-age (dt_out_age)|artifacts/scalars.rds|
+val_bau_2050_M|scalar|Supplement: Validation|reproduced|million|34|MO:dead|BAU; year 2050; 4 causes; ages 20-95; 190 countries|sum|valida-ihme-foresight2|artifacts/scalars.rds|
+val_foresight_2050_M|scalar|Supplement: Validation|reproduced|million|23|FOR:Year,Scenario,Value|GBD 2019 Foresight Reference, Global, both sexes, 20+, 2050, 4 causes|sum|valida-ihme-foresight2|artifacts/scalars.rds|
+val_unwpp_2050_M|scalar|Supplement: Validation|reproduced|million|87.4|UND:year,deaths_unwpp|UN-WPP 2024, 2050, ages 20+, all locations in UND|sum|output-mortality|artifacts/scalars.rds|
+val_chong_2050_M|scalar|Supplement: Validation|fixed_external|million|35.6|LIT: Chong 2024|CVD deaths 2050|quoted|-|artifacts/scalars.rds|
+cmp_kontis_pct_higher|scalar|Comparison p2|reproduced|%|25|MO:dead; LIT: Kontis 2019|All vs BAU; W|100 x (dd_all_total / 94.3 - 1)|-|artifacts/scalars.rds|
+kontis_all_M|scalar|Comparison p2; Table S2|fixed_external|million|94.3|LIT: Kontis 2019|three interventions, 2015-2040|quoted|-|artifacts/scalars.rds|
+cmp_pick_pct_higher|scalar|Comparison p2|reproduced|%|33|MO:dead; LIT: Pickersgill 2022|All vs BAU; W|100 x (dd_all_total / 88.5 - 1)|-|artifacts/scalars.rds|
+pick_all_M|scalar|Comparison p2; Table S2|fixed_external|million|88.5|LIT: Pickersgill 2022|two interventions, 2022-2050|quoted|-|artifacts/scalars.rds|
+dd_all_china_M|scalar|Comparison p2; Comparison sodium; Table S3|reproduced|million|39.9|MO:dead,location|All vs BAU; W; China|sum of deaths delayed|out-tab-loc|artifacts/scalars.rds|
+kontis_china_M|scalar|Comparison p2; Table S3|fixed_external|million|19.1|LIT: Kontis 2019 suppl.|China|quoted|-|artifacts/scalars.rds|
+pick_china_M|scalar|Comparison p2; Table S3|fixed_external|million|27|LIT: Pickersgill 2022|China|quoted|-|artifacts/scalars.rds|
+dd_all_india_M|scalar|Comparison p2; Table S3|reproduced|million|19.5|MO:dead,location|All vs BAU; W; India|sum of deaths delayed|out-tab-loc|artifacts/scalars.rds|
+kontis_india_M|scalar|Comparison p2; Table S3|fixed_external|million|16.7|LIT: Kontis 2019 suppl.|India|quoted|-|artifacts/scalars.rds|
+pick_india_M|scalar|Comparison p2; Table S3|fixed_external|million|12|LIT: Pickersgill 2022|India|quoted|-|artifacts/scalars.rds|
+dd_all_usa_M|scalar|Comparison p2; Table S3|reproduced|million|1.1|MO:dead,location|All vs BAU; W; United States|sum of deaths delayed|out-tab-loc|artifacts/scalars.rds|
+kontis_usa_M|scalar|Comparison p2; Table S3|fixed_external|million|3.7|LIT: Kontis 2019 suppl.|United States|quoted|-|artifacts/scalars.rds|
+kontis_methods_htn_M_r0|scalar|Comparison HTN|preserved_pending|million|41|none|Kontis-methods replication, HTN|legacy text (Table S2 shows 40.9)|none in report|artifacts/scalars.rds|Kontis-methods replication runs
+sodium_china_gbd23_vs_gbd10_pct|scalar|Comparison sodium|reproduced|%|40|SOD:sodium_current; POW:sodium_powles_2010|China; GBD 2023 (2025 baseline) vs GBD 2010|100 x (GBD 2023 / GBD 2010 - 1)|out-policy-salt (Powles comparison)|artifacts/scalars.rds|
+kontis_china_M_r0|scalar|Comparison sodium|fixed_external|million|19|LIT: Kontis 2019 suppl.|China|quoted (19.1)|-|artifacts/scalars.rds|
+kontis_methods_china_text_M|scalar|Comparison sodium|preserved_pending|million|32|none|Kontis-methods replication, China|legacy text (Table S3 shows 30.6)|none in report|artifacts/scalars.rds|Kontis-methods replication runs
+kontis_tfa_M_r0|scalar|Comparison TFA|fixed_external|million|15|LIT: Kontis 2019|TFA, 2015-2040|quoted (14.8)|-|artifacts/scalars.rds|
+kontis_methods_tfa_text|scalar|Comparison TFA|preserved_pending|text|just over 4.5 million over 24 years|none|Kontis-methods replication, TFA|legacy text (Table S2 shows 4.2; 4.5 is this study)|none in report|artifacts/scalars.rds|Kontis-methods replication runs; window
+tfa_bans_since_2017_M|scalar|Comparison TFA|preserved_pending|million|10|none|TFA bans since 2017|14.8 minus a replication value|none in report|artifacts/scalars.rds|Kontis-methods replication runs
+tfa_india_ban_M|scalar|Comparison TFA|preserved_pending|million|4|none|India TFA ban counterfactual|not in outputs|none in report|artifacts/scalars.rds|TFA run without India's 2021 limit
+htn_aroc_threshold_pp|scalar|Methods: Interventions and scenario modeling|static_content|pp/year|3|NCD:controlled|NCD-RisC 2019; 50% by 2040|threshold claim; count of countries above it is printed in section 20|out-policy-bp-past|artifacts/scalars.rds|
+T1_Scenarios|table|Table 1|mixed|-|-|SOD:sodium_current; STA:statins_current; TFAD:tfa_current,age,year; POP:Nx; MS|baseline column: 2025 values (TFA: GBD 2024 at ages 50-54), 2019 UN-WPP all-age weights, 190 countries|baseline column: population-weighted means; other columns static text|out-policy-salt; out-policy-tf; out-policy-statins|tables/T1_Scenarios.csv; artifacts/tables_display.rds|HTN baseline (37%) preserved: source not identified
+T2_DeathsDelayed|table|Table 2|reproduced|million|-|MO:dead,cause|5 interventions vs BAU; W; all-CVD and cause rows|BAU, projected, DD, DD/25, DD/BAU|out-tab-int-caut; out-tab-int-cau|tables/T2_DeathsDelayed.csv; artifacts/tables_display.rds|
+TS1_Regions|table|Table S1|reproduced|-|-|MO:location; CG:location_wb,Super_region|190 countries|countries listed by region|output-countrylist|tables/TS1_Regions.csv; artifacts/tables_display.rds|
+TS2_CompareIntervention|table|Table S2|mixed|million|-|MO:dead; LIT|this study: W|this-study column reproduced; Kontis-methods preserved; Kontis and Pickersgill quoted|out-tab-int-caut|tables/TS2_CompareIntervention.csv; artifacts/tables_display.rds|Kontis-methods replication runs
+TS3_CompareCountry|table|Table S3|mixed|million|-|MO:dead,location; LIT|All vs BAU; W; 15 countries (Kontis top 15)|this-study column reproduced; Kontis-methods preserved; Kontis and Pickersgill quoted|out-tab-loc|tables/TS3_CompareCountry.csv; artifacts/tables_display.rds|Kontis-methods replication runs
+TS4_ModelCompare|table|Table S4|static_content|-|-|MS|-|author-written|-|tables/TS4_ModelCompare.csv; artifacts/tables_display.rds|
+TS5_Premature_Sex|table|Table S5|reproduced|deaths|-|MO:dead,age,sex|5 interventions vs BAU; W; ages 20-69|DD<70 and DD<70 / DD all ages (the note's definition)|ADD: <70 outputs|tables/TS5_Premature_Sex.csv; artifacts/tables_display.rds|
+TS6_Premature_Top30|table|Table S6|reproduced|deaths|-|MO:dead,age,pop|All vs BAU; W; 30 countries with the largest BAU adult population in 2025|DD<70 and DD<70 / DD all ages|ADD: <70 outputs|tables/TS6_Premature_Top30.csv; artifacts/tables_display.rds|
+TS7_ByCountry|table|Table S7|reproduced|deaths|-|MO:dead,location; CG|All vs BAU; W; 190 countries|BAU, projected, DD, DD/25, DD/BAU|out-tab-loc|tables/TS7_ByCountry.csv; artifacts/tables_display.rds|
+TS8_Sensitivity|table|Table S8|mixed|million|-|MO:dead (base rows); legacy|all rows 2025-2050 (yr_s8_start), the legacy window of the preserved rows; base rows: main scenario|base rows reproduced except per-year (legacy /24); other rows preserved|none in report|tables/TS8_Sensitivity.csv; artifacts/tables_display.rds|alternative-trend simulation outputs (on 2026-2050); per-year divisor
+TS9_Assumptions|table|Table S9|static_content|-|-|MS|-|author-written|-|tables/TS9_Assumptions.csv; artifacts/tables_display.rds|
+Math_CF_ReductionFactors|table|Supplement: math (Step 9)|static_content|-|-|MS; MC (checked)|-|inline pipe table, checked against cf_reduction_per_control|-|tables/Math_CF_ReductionFactors.csv|
+Math_TFA_RR|table|Supplement: math (TFA)|static_content|-|-|MS; MC (checked)|-|inline pipe table, checked against rr_per_1percent|-|tables/Math_TFA_RR.csv|
+Math_Statin_RR|table|Supplement: math (statins)|static_content|-|-|MS; MC (checked)|-|inline pipe table, checked against rr_ir_* and rr_cf_*|-|tables/Math_Statin_RR.csv|
+Math_TransitionRates|table|Supplement: math (multi-state model)|static_content|-|-|MS; MC (checked)|-|inline pipe table; caps checked|-|tables/Math_TransitionRates.csv|
+Math_Notation|table|Supplement: math (notation)|static_content|-|-|MS|-|inline pipe table|-|tables/Math_Notation.csv|
+fig1a_annual_deaths_delayed.png|figure|Figure 1 (top)|reproduced|deaths|-|MO:dead,year|4 single interventions vs BAU; years W|annual DD stacked by intervention (separate effects; the stack top is not the combined effect)|output-tsplot|figures/fig1a_annual_deaths_delayed.png; artifacts/plot_data.rds|
+fig1b_cumulative_deaths_delayed.png|figure|Figure 1 (bottom)|reproduced|deaths|-|MO:dead,year|as fig1a|cumulative DD stacked by intervention|output-tsplot|figures/fig1b_cumulative_deaths_delayed.png; artifacts/plot_data.rds|
+fig2_deaths_delayed_sex_age.png|figure|Figure 2|reproduced|million|-|MO:dead,age,sex|5 interventions vs BAU; W|DD by intervention, age group and sex|1out-int-age|figures/fig2_deaths_delayed_sex_age.png; artifacts/plot_data.rds|
+fig3a_map_pct_delayed_female.png|figure|Figure 3 (top)|reproduced|%|-|MO:dead,location,sex; CG:iso3; Natural Earth|All vs BAU; W; women|DD/BAU by country, binned|out-map-mx|figures/fig3a_map_pct_delayed_female.png; artifacts/plot_data.rds|
+fig3b_map_pct_delayed_male.png|figure|Figure 3 (bottom)|reproduced|%|-|MO:dead,location,sex; CG:iso3; Natural Earth|All vs BAU; W; men|DD/BAU by country, binned|out-map-mx|figures/fig3b_map_pct_delayed_male.png; artifacts/plot_data.rds|
+fig4_deaths_delayed_sex_age_region.png|figure|Figure 4|reproduced|deaths|-|MO:dead,age,sex; CG:Super_region|4 single interventions vs BAU; W|DD by sex, age group and region|output-excel (dt_out_5 dot plot)|figures/fig4_deaths_delayed_sex_age_region.png; artifacts/plot_data.rds|
+figS1a_traj_hypertension_control.png|figure|Figure S1 (A)|reproduced|%|-|HBP:location,year,baseline_ctrl,control_scaled|190 countries|control trajectories|out-policy-bp|figures/figS1a_traj_hypertension_control.png|
+figS1b_traj_sodium.png|figure|Figure S1 (B)|reproduced|g/day|-|SOD:location,year,sodium_target_asp|190 countries; floor 2 g/day|sodium trajectories|out-policy-salt|figures/figS1b_traj_sodium.png|
+figS1c_traj_tfa.png|figure|Figure S1 (C)|reproduced|%E|-|TFAS:location,year,tfa_target|190 countries with TFA data; 2019+|TFA trajectories|out-policy-tfa-scenarios|figures/figS1c_traj_tfa.png|
+figS1d_traj_statins.png|figure|Figure S1 (D)|reproduced|%|-|STA:location,year,statins_uptake|190 countries|statin uptake trajectories|out-policy-statins|figures/figS1d_traj_statins.png|
+figS2a_required_htn_scaleup.png|figure|Figure S2 (top)|reproduced|pp/year|-|NCD:Country,ISO,Sex,Year,controlled|NCD-RisC 2019, sexes averaged; start 2026; target 50%|required AROC to 2030/2040/2050, in percentage points|out-policy-bp-past|figures/figS2a_required_htn_scaleup.png; artifacts/plot_data.rds|
+figS2b_historical_cascade_changes.png|figure|Figure S2 (bottom)|reproduced|pp|-|NCD:Country,Sex,Year,diagnosed,treated,controlled|NCD-RisC 2000-2019 and 2010-2019|year-to-year changes, boxplots by sex|out-policy-bp-past|figures/figS2b_historical_cascade_changes.png|
+figS3_asmr_by_cause.png|figure|Figure S3|preserved_pending|per 100,000|-|BR; MO; standard weights|ASMR, 2000-2050|legacy PNG kept|output-mortality (ASMR)|figures/figS3_asmr_by_cause.png|verified standard-population weights and a per-person denominator
+figS4a_asmr_index_vs_foresight.png|figure|Figure S4 (top)|preserved_pending|index|-|BR; MO; FOR asr files; standard weights|ASMR index 2019 = 100|legacy PNG kept|valida-ihme-foresight|figures/figS4a_asmr_index_vs_foresight.png|verified standard-population weights
+figS4b_deaths_vs_foresight.png|figure|Figure S4 (bottom)|reproduced|million|-|BR:Nx,DIS.mx.t0; MO:dead; FOR:Year,Value|BAU; 190 countries; both sexes; 20+; 2000-2050|deaths by cause vs Foresight Reference|valida-ihme-foresight2|figures/figS4b_deaths_vs_foresight.png; artifacts/plot_data.rds|
+figS5_deaths_vs_unwpp.png|figure|Figure S5|reproduced|million|-|BR:Nx,DIS.mx.t0,BG.mx.all; MO:all.mx; UND:deaths_unwpp|BAU; by sex; ages 20+; 2000-2050|all-cause deaths vs UN-WPP|output-mortality|figures/figS5_deaths_vs_unwpp.png; artifacts/plot_data.rds|
+"
+inventory <- fread(text = trimws(inv_txt), sep = "|", quote = "", header = TRUE, colClasses = "character",
+                   strip.white = TRUE)
+for (j in names(inventory)) set(inventory, which(is.na(inventory[[j]])), j, "")
+check(!anyDuplicated(inventory$id), "duplicated inventory ids")
+check(all(inventory$status %in% c("reproduced", "fixed_external", "static_content", "preserved_pending", "mixed")),
+      "unknown status in inventory")
+
+input_legend <- data.table(
+  code = c("MO", "CG", "POP", "UND", "BR", "HBP", "SOD", "TFAS", "TFAD", "STA", "NCD", "FOR", "POW", "ETT", "MC", "LIT", "MS"),
+  path = c("output/out_model/model_output_part_<Country>.rds", "Country_groupings_extended.csv",
+           "data/processed/UN2024/PopulationsSingleAge0050.rds", "data/processed/UN2024/DeathsSingleAge0050.rds",
+           "data/processed/adjusted_searo_part<N>.rds", "data/processed/BloodPressure/hbp_control_data.rds",
+           "data/processed/Sodium/sodium_policy_scenarios.rds", "data/processed/TFAPolicy/tfa_policy_scenarios.rds",
+           "data/processed/TFAPolicy/tfa_data.rds", "data/processed/Statins/statin_data.rds",
+           "data-raw/NCD-RisC/NCD-RisC_Lancet_2021_Hypertension_age_standardised_countries.csv",
+           "data-raw/GBD/gbd2023_foresight_dx_<cause>20+.csv (GBD 2019 Foresight, per the file footer)",
+           "data-raw/dt_sodium_powles_2013.csv", "ettehad_rr_bp_reduction_10mmHg.csv",
+           "code/7. model_100_multiplicative_func_new3_gbd23_noaroc.R (read as text)",
+           "published literature (hard-coded with citation)", "author-written manuscript content (hard-coded)"),
+  columns = c("scenario, intervention, location, cause, sex, age, year, well, sick, dead, pop, all.mx",
+              "iso3, location_wb, Super_region", "location, year_id, age, Nx", "location, year, sex, age, deaths_unwpp",
+              "location, year, sex, age, cause, Nx, DIS.mx.t0, BG.mx.all", "location, year, baseline_ctrl, control_scaled",
+              "location, year, sodium_current, sodium_target_asp", "location, year, tfa_current, tfa_target",
+              "location, year, sex, age, tfa_current", "location, year, statins_uptake, statins_current",
+              "Country/Region/World, ISO, Sex, Year, proportions diagnosed/treated/controlled",
+              "Scenario, Location, Sex, Age, Measure, Year, Cause of death or injury, Value",
+              "location, sodium_powles_2010", "Cause, SBP_Category, RR", "parameter constants", "-", "-"))
+
+knitr::kable(input_legend, caption = "Input codes used in the inventory")
+knitr::kable(inventory[, .N, by = .(type, status)], caption = "Inventory counts by type and status")
+knitr::kable(inventory[, !"output"], caption = "Inventory (one row per manuscript number, table and figure)")
+```
+
+# 2. Inputs and checks
+
+Reads only the files below, through paths built from the repository root. External OneDrive paths in the
+report (`NCD-RisC`, `GBD` Foresight, Powles) have byte-identical copies under `data-raw/`, used here.
+
+```{r inputs}
+in_files <- list(
+  MO   = rp("output", "out_model"),
+  CG   = rp("Country_groupings_extended.csv"),
+  POP  = rp("data", "processed", "UN2024", "PopulationsSingleAge0050.rds"),
+  UND  = rp("data", "processed", "UN2024", "DeathsSingleAge0050.rds"),
+  HBP  = rp("data", "processed", "BloodPressure", "hbp_control_data.rds"),
+  SOD  = rp("data", "processed", "Sodium", "sodium_policy_scenarios.rds"),
+  TFAS = rp("data", "processed", "TFAPolicy", "tfa_policy_scenarios.rds"),
+  TFAD = rp("data", "processed", "TFAPolicy", "tfa_data.rds"),
+  STA  = rp("data", "processed", "Statins", "statin_data.rds"),
+  NCD  = rp("data-raw", "NCD-RisC", "NCD-RisC_Lancet_2021_Hypertension_age_standardised_countries.csv"),
+  FOR  = rp("data-raw", "GBD", sprintf("gbd2023_foresight_dx_%s20+.csv", names(cause_map))),
+  POW  = rp("data-raw", "dt_sodium_powles_2013.csv"),
+  ETT  = rp("ettehad_rr_bp_reduction_10mmHg.csv"),
+  MC   = rp("code", "7. model_100_multiplicative_func_new3_gbd23_noaroc.R"))
+need_files(unlist(in_files))
+in_files$BR <- sort(list.files(rp("data", "processed"), pattern = "^adjusted_searo_part[0-9]+\\.rds$", full.names = TRUE))
+check(length(in_files$BR) > 0, "no data/processed/adjusted_searo_part*.rds files")
+
+# ---- Model parameters, read from the stage-7 script as text (never sourced) ----
+mc_txt <- readLines(in_files$MC, warn = FALSE)
+mc_num <- function(pattern) {
+  hit <- regmatches(mc_txt, regexpr(pattern, mc_txt, perl = TRUE))
+  check(length(hit) >= 1, paste("model-code constant not found:", pattern))
+  as.numeric(sub(pattern, "\\1", hit[length(hit)], perl = TRUE))
+}
+mp <- list(
+  target_control         = mc_num("^target_control\\s*<-\\s*([0-9.]+)"),
+  control_start_year     = mc_num("^control_start_year\\s*<-\\s*([0-9]+)"),
+  control_target_year    = mc_num("^control_target_year\\s*<-\\s*([0-9]+)"),
+  salteff                = mc_num("^salteff\\s*<-\\s*([0-9.]+)"),
+  saltyear1              = mc_num("^saltyear1\\s*<-\\s*([0-9]+)"),
+  saltyear2              = mc_num("^saltyear2\\s*<-\\s*([0-9]+)"),
+  tfa_target_tfa         = mc_num("^tfa_target_tfa\\s*<-\\s*([0-9.]+)"),
+  tfa_policy_start_year  = mc_num("^tfa_policy_start_year\\s*<-\\s*([0-9]+)"),
+  statin_target_coverage = mc_num("^statin_target_coverage\\s*<-\\s*([0-9.]+)"),
+  statin_start_year      = mc_num("^statin_start_year\\s*<-\\s*([0-9]+)"),
+  statin_target_year     = mc_num("^statin_target_year\\s*<-\\s*([0-9]+)"),
+  adherence_ir           = mc_num("^adherence_ir\\s*<-\\s*([0-9.]+)"),
+  adherence_cf           = mc_num("^adherence_cf\\s*<-\\s*([0-9.]+)"))
+check(yr_impl_start == min(mp$control_start_year, mp$saltyear1, mp$statin_start_year, mp$tfa_policy_start_year),
+      "yr_impl_start differs from the earliest intervention start year in the model code")
+
+# ---- Stage-7 model outputs: one file per country, aggregated file by file ----
+# Adapted from report chunk `output-data`, which rbinds all files into `data.out`. Here each file is
+# checked, deaths delayed are computed within matching strata (intervention vs BAU on cause, sex, single
+# age and year) and only compact aggregates are kept. Population and all.mx repeat across the four cause
+# models, so one copy (ihd) is used for them.
+mo_cols <- c("scenario", "age", "cause", "sex", "year", "well", "sick", "newcases", "dead", "pop",
+             "all.mx", "intervention", "location")
+n_ages  <- length(20:95)
+read_model_file <- function(f) {
+  x <- readRDS(f); setDT(x)
+  loc <- sub("^model_output_part_(.+)\\.rds$", "\\1", basename(f))
+  need_cols(x, mo_cols, basename(f))
+  n_rows <- nrow(x)
+  check(identical(unique(x$location), loc), paste(loc, ": location column does not match the file name"))
+  check(setequal(unique(x$intervention), names(scen_of_int)), paste(loc, ": unexpected intervention labels"))
+  check(all(x$scenario == scen_of_int[x$intervention]), paste(loc, ": scenario and intervention labels disagree"))
+  check(setequal(unique(x$cause), names(cause_map)), paste(loc, ": unexpected causes"))
+  check(setequal(unique(x$sex), c("Female", "Male")), paste(loc, ": unexpected sexes"))
+  check(min(x$age) == 20 && max(x$age) == 95, paste(loc, ": ages are not 20-95"))
+  check(min(x$year) <= yr_model_start && max(x$year) == yr_end, paste(loc, ": years do not cover", yr_model_start, "-", yr_end))
+  x <- x[intervention %in% names(int_raw) & year >= yr_model_start]
+  x[, int := unname(int_raw[intervention])]
+  # Rows with non-finite states are dropped. Known case: Antigua and Barbuda, BP-only, one male cohort from
+  # 2026 plus one duplicated key. Those strata get no deaths delayed (projected = BAU).
+  bad <- !(is.finite(x$well) & is.finite(x$sick) & is.finite(x$dead) & is.finite(x$pop) & is.finite(x$all.mx))
+  n_bad <- sum(bad); bad_int <- paste(unique(x$int[bad]), collapse = ",")
+  x <- x[!bad]
+  check(nrow(x[, .N, by = .(int, cause, sex, age, year)][N > 1]) == 0, paste(loc, ": duplicated strata"))
+  n_grid <- 4L * 2L * n_ages * (yr_end - yr_model_start + 1L)
+  bau <- x[int == "BAU", .(cause, sex, age, year, bau = dead)]
+  check(nrow(bau) == n_grid, paste(loc, ": BAU grid is incomplete"))
+  check(all(x$dead >= 0), paste(loc, ": negative deaths"))
+  rep_dev <- x[, .(d = max(abs(pop - pop[1])) / max(pop[1], 1) + max(abs(all.mx - all.mx[1])) / max(all.mx[1], 1e-9)),
+               by = .(int, sex, age, year)][, max(d)]
+  check(rep_dev < 1e-8, paste(loc, ": pop or all.mx differ across cause models"))
+  y <- merge(x[int != "BAU", .(int, cause, sex, age, year, dead)], bau, by = c("cause", "sex", "age", "year"))
+  y[, dd := bau - dead]
+  miss <- rbindlist(lapply(setdiff(int_raw, "BAU"), function(i)
+    bau[year %in% win_cum][!y[int == i], on = .(cause, sex, age, year)][, .(int = i, n = .N, bau_missing = sum(bau))]))
+  y[, age_group := age_group_of(age)]
+  bau[, age_group := age_group_of(age)]
+  list(
+    B   = bau[, .(bau = sum(bau)), by = .(cause, sex, age_group, year)][, location := loc],
+    D   = y[, .(dd = sum(dd)), by = .(int, cause, sex, age_group, year)][, location := loc],
+    PJ  = merge(x[int != "BAU" & year %in% win_cum, .(proj_direct = sum(dead)), by = int], miss, by = "int")[, location := loc],
+    AC  = x[int == "BAU" & cause == "ihd", .(all_mx = sum(all.mx), pop = sum(pop)), by = .(sex, year)][, location := loc],
+    LOG = data.table(location = loc, rows = n_rows, dropped_rows = n_bad, dropped_in = bad_int, duplicated_strata = 0L,
+                     cause_copy_deviation = rep_dev, strata_without_effect = sum(miss$n),
+                     dd_before_start = y[year < yr_impl_start, sum(abs(dd))], min_dd = min(y$dd)))
+}
+mo_files <- sort(list.files(in_files$MO, pattern = "^model_output_part_.+\\.rds$", full.names = TRUE))
+check(length(mo_files) > 0, "no model output files found")
+mo <- lapply(mo_files, read_model_file)
+B      <- rbindlist(lapply(mo, `[[`, "B"))
+D      <- rbindlist(lapply(mo, `[[`, "D"))
+PJ     <- rbindlist(lapply(mo, `[[`, "PJ"))
+AC     <- rbindlist(lapply(mo, `[[`, "AC"))
+mo_log <- rbindlist(lapply(mo, `[[`, "LOG"))
+rm(mo); invisible(gc())
+
+locs <- setdiff(sort(unique(B$location)), locs_exclude)
+B <- B[location %in% locs]; D <- D[location %in% locs]; PJ <- PJ[location %in% locs]; AC <- AC[location %in% locs]
+check(nrow(D[!B, on = .(location, cause, sex, age_group, year)]) == 0, "deaths-delayed strata without a BAU match")
+check(D[year < yr_impl_start, sum(abs(dd))] < 1e-6, "deaths delayed before the first intervention year")
+check(all(is.finite(B$bau)) && all(is.finite(D$dd)) && all(is.finite(AC$all_mx)), "non-finite aggregates")
+
+# ---- Regions and ISO3 codes (report chunk `transversals`) ----
+CD <- fread(in_files$CG, select = c("iso3", "location_wb", "Super_region"))
+setnames(CD, c("location_wb", "Super_region"), c("location", "region"))
+CD[location %in% names(region_name_fix), location := region_name_fix[location]]
+CD[location == "South Sudan", iso3 := "SDS"]
+CD <- rbind(CD, region_add, use.names = TRUE)
+check(!anyDuplicated(CD$location), "duplicated locations in the country groupings")
+check(length(setdiff(locs, CD$location)) == 0, paste("countries without a region:", paste(setdiff(locs, CD$location), collapse = ", ")))
+CD <- CD[location %in% locs]
+check(setequal(unique(CD$region), region_abbr), "unexpected region names")
+B[CD, region := i.region, on = "location"]; D[CD, region := i.region, on = "location"]
+B[, u70 := age_group == "<70"]; D[, u70 := age_group == "<70"]
+
+# ---- Other inputs ----
+POP <- as.data.table(readRDS(in_files$POP)); need_cols(POP, c("location", "year_id", "age", "Nx"), "POP")
+UND <- as.data.table(readRDS(in_files$UND)); need_cols(UND, c("location", "year", "sex", "age", "deaths_unwpp"), "UND")
+check(min(UND$age) == 20, "UN-WPP deaths file is expected to start at age 20")
+HBP <- as.data.table(readRDS(in_files$HBP)); need_cols(HBP, c("location", "year", "baseline_ctrl", "control_scaled"), "HBP")
+SOD <- as.data.table(readRDS(in_files$SOD)); need_cols(SOD, c("location", "year", "sodium_current", "sodium_target_asp"), "SOD")
+TFAS <- as.data.table(readRDS(in_files$TFAS)); need_cols(TFAS, c("location", "year", "tfa_current", "tfa_target"), "TFAS")
+TFAD <- as.data.table(readRDS(in_files$TFAD)); need_cols(TFAD, c("location", "year", "sex", "age", "tfa_current"), "TFAD")
+STA <- as.data.table(readRDS(in_files$STA)); need_cols(STA, c("location", "year", "statins_uptake", "statins_current"), "STA")
+for (nm in c("HBP", "SOD", "STA")) {
+  dt <- get(nm)
+  check(nrow(dt[, .N, by = .(location, year)][N > 1]) == 0, paste(nm, ": duplicated location-year rows"))
+  check(all(locs %in% dt$location), paste(nm, ": missing modelled countries"))
+}
+check(nrow(TFAS[, .N, by = .(location, year)][N > 1]) == 0, "TFAS: duplicated location-year rows")
+NCD <- fread(in_files$NCD)
+need_cols(NCD, c("Country/Region/World", "ISO", "Sex", "Year", "Proportion of diagnosed hypertension among all hypertension",
+                 "Proportion of treated hypertension among all hypertension",
+                 "Proportion of controlled hypertension among all hypertension"), "NCD")
+setnames(NCD, c("Country/Region/World", "Proportion of diagnosed hypertension among all hypertension",
+                "Proportion of treated hypertension among all hypertension",
+                "Proportion of controlled hypertension among all hypertension"),
+         c("Country", "diagnosed", "treated", "controlled"))
+NCD <- NCD[, .(Country, ISO, Sex, Year, diagnosed, treated, controlled)]
+check(nrow(NCD[, .N, by = .(Country, Sex, Year)][N > 1]) == 0, "NCD-RisC: duplicated country-sex-year rows")
+# Foresight files carry a one-line citation footer that fread drops (with a warning); rows are validated below.
+FOR <- rbindlist(lapply(in_files$FOR, function(f) suppressWarnings(fread(f))))
+setnames(FOR, tolower(gsub(" ", "_", names(FOR))))
+check(all(FOR$scenario %in% c("Past", "Reference")) && all(FOR$location == "Global") && all(FOR$sex == "Both") &&
+      all(FOR$age == "20+ years") && all(FOR$measure == "Deaths"), "Foresight files: unexpected scope")
+check(setequal(unique(FOR$cause_of_death_or_injury), cause_map), "Foresight files: unexpected causes")
+check(nrow(FOR[, .N, by = .(year, cause_of_death_or_injury)][N > 1]) == 0, "Foresight files: duplicated cause-years")
+POW <- fread(in_files$POW); need_cols(POW, c("location", "sodium_powles_2010"), "POW")
+ETT <- fread(in_files$ETT); need_cols(ETT, c("Cause", "SBP_Category", "RR"), "ETT")
+
+# Calibration-period rates (report chunk `output-incidence`): observed deaths for 2000-2018 in Fig S4b and S5.
+BR <- rbindlist(lapply(in_files$BR, function(f) {
+  x <- readRDS(f); setDT(x)
+  need_cols(x, c("location", "year", "sex", "age", "cause", "Nx", "DIS.mx.t0", "BG.mx.all"), basename(f))
+  x[!is.na(location) & year <= yr_obs_end & location %in% locs, .(location, year, sex, age, cause, Nx, DIS.mx.t0, BG.mx.all)]
+}))
+check(setequal(unique(BR$cause), cause_map), "calibration rates: unexpected causes")
+check(nrow(BR[, .N, by = .(location, year, sex, age, cause)][N > 1]) == 0, "calibration rates: duplicated strata")
+check(BR[, .(n = uniqueN(Nx) + uniqueN(BG.mx.all)), by = .(location, year, sex, age)][, all(n == 2)],
+      "calibration rates: Nx or BG.mx.all differ across causes")
+check(all(is.finite(BR$Nx) & is.finite(BR$DIS.mx.t0) & is.finite(BR$BG.mx.all)), "calibration rates: non-finite values")
+check(setequal(unique(BR$location), locs), "calibration rates do not cover the modelled countries")
+
+input_log <- data.table(
+  check = c("model output files", "modelled countries", "rows read", "rows dropped (non-finite states)",
+            "countries with dropped rows", "strata given no effect (window)", "deaths delayed before 2026",
+            "most negative single-stratum DD (deaths; competing risks)"),
+  value = c(length(mo_files), length(locs), sum(mo_log$rows), sum(mo_log$dropped_rows),
+            paste(mo_log[dropped_rows > 0, sprintf("%s (%s)", location, dropped_in)], collapse = "; "),
+            sum(mo_log$strata_without_effect), signif(sum(mo_log$dd_before_start), 3), signif(min(mo_log$min_dd), 3)))
+knitr::kable(input_log, caption = "Model-output checks")
+```
+
+```{r core}
+# ---- Core summary used by every section: BAU and deaths delayed (DD) summed over strata ----
+# DD = BAU - intervention, computed within matching strata in read_model_file(). The combined effect is
+# the simulated "All" scenario, never a sum of the separate effects.
+summ <- function(by = character(0), years = win_cum, ints = int_table, where = NULL) {
+  bb <- B[year %in% years]; dd <- D[year %in% years & int %in% ints]
+  if (!is.null(where)) { bb <- bb[eval(where)]; dd <- dd[eval(where)] }
+  if (length(by)) {
+    out <- merge(dd[, .(dd = sum(dd)), by = c("int", by)], bb[, .(bau = sum(bau)), by = by], by = by, all.x = TRUE)
+  } else {
+    out <- dd[, .(dd = sum(dd)), by = "int"][, bau := sum(bb$bau)]
+  }
+  check(!anyNA(out$bau), "summ(): deaths delayed without a BAU denominator")
+  out[, `:=`(proj = bau - dd, pct = dd / bau, per_year = dd / n_impl_years)]
+  out[]
+}
+s_int   <- summ()
+s_cause <- summ("cause")
+s_sex   <- summ("sex")
+s_age   <- summ("age_group")
+s_u70   <- summ("u70")
+s_reg   <- summ("region")
+s_loc   <- summ(c("region", "location"))
+
+# projected deaths: BAU - DD equals the direct sum of intervention deaths plus BAU deaths in no-effect strata
+pj_chk <- merge(PJ[, .(proj_direct = sum(proj_direct), bau_missing = sum(bau_missing)), by = int], s_int[, .(int, proj)], by = "int")
+check(pj_chk[, max(abs(proj_direct + bau_missing - proj) / proj)] < 1e-9, "projected deaths do not reconcile")
+
+# ---- Scalar registry: values are set once, by inventory id ----
+SC <- list()
+set_sc <- function(key, value, display, note = "") {
+  inv <- inventory[match(key, inventory$id)]
+  check(!is.na(inv$type) && inv$type == "scalar", paste("set_sc(): unknown scalar", key))
+  check(inv$status == "reproduced", paste("set_sc(): scalar", key, "is not marked reproduced"))
+  check(is.null(SC[[key]]), paste("set_sc(): scalar", key, "set twice"))
+  check(length(value) == 1 && is.finite(value), paste("set_sc(): non-finite value for", key))
+  SC[[key]] <<- list(value = unname(value), display = unname(display), note = note)
+}
+scM <- function(key, x, d = 1) set_sc(key, x / 1e6, fmt_num(x / 1e6, d))
+scP <- function(key, p, d = 1) set_sc(key, 100 * p, formatC(100 * p, format = "f", digits = d))
+reg_pct <- function(i, r) g(s_reg, "pct", int = i, region = region_abbr[[r]])
+
+# ---- Table registry: CSV values, display strings and cell statuses ----
+TB <- list()
+add_table <- function(sheet, csv, display, status, bold = integer(), numfmt = character(0)) {
+  csv <- as.data.table(csv); display <- as.data.frame(display, check.names = FALSE)
+  if (length(status) == 1) status <- matrix(status, nrow(csv), ncol(csv))
+  check(identical(dim(status), dim(csv)), paste(sheet, ": status matrix does not match the CSV"))
+  check(nrow(display) == nrow(csv), paste(sheet, ": display and CSV rows differ"))
+  check(!anyNA(as.matrix(display)), paste(sheet, ": NA in display strings"))
+  TB[[sheet]] <<- list(csv = csv, display = display, status = status, bold = bold, numfmt = numfmt)
+}
+PD <- list()   # compact plot data (aggregates only)
+```
+
+# 3. Abstract and Methods: coverage
+
+Reads model output locations and UN-WPP 2019 population (report chunk `output-data`, `pop_coverage`).
+
+```{r abstract-methods}
+set_sc("n_countries", length(locs), as.character(length(locs)))
+pop19 <- POP[year_id == 2019 & age >= 20, .(Nx = sum(Nx, na.rm = TRUE)), by = location]
+cov_pct <- 100 * pop19[location %in% locs, sum(Nx)] / pop19[, sum(Nx)]
+set_sc("pop_coverage_pct", cov_pct, as.character(floor(cov_pct)),
+       note = sprintf("%.2f%% of the 2019 UN-WPP population aged 20+ (%d locations); floored", cov_pct, nrow(pop19)))
+```
+
+# 4. Table 1: intervention scenarios
+
+Baseline column: 2025 population-weighted means over the 190 countries, weights = 2019 UN-WPP population
+summed over all ages in `POP` (report chunks `out-policy-salt`, `out-policy-tf`, `out-policy-statins`).
+TFA uses the report's definition (GBD 2024 intake at ages 50-54 from `TFAD`, both sexes), which reproduces
+the legacy 0.4%; the 2025 scenario baseline in `TFAS` is lower (countries with bans are set to 0) and is
+printed below. The hypertension baseline (37%) is preserved: no repo input reproduces it.
+
+```{r table1}
+w19 <- POP[year_id == 2019, .(w = sum(Nx, na.rm = TRUE)), by = location][location %in% locs]
+wmean <- function(dt, col, min_n = length(locs) - 1) {
+  x <- merge(dt[location %in% locs], w19, by = "location")
+  check(uniqueN(x$location) >= min_n, paste("Table 1 baseline: too few countries for", col))
+  x[, weighted.mean(get(col), w)]
+}
+tfad <- copy(TFAD)
+tfad[location == "United States of America", location := "United States"]
+tfad[location == "Bolivia (Plurinational State of)", location := "Bolivia"]
+tfad[location == "United Republic of Tanzania", location := "Tanzania"]
+t1_base <- c(
+  sodium  = wmean(SOD[year == 2025], "sodium_current"),
+  tfa     = wmean(tfad[age == "50 to 54" & year == 2024 & !is.na(tfa_current)], "tfa_current"),
+  statins = wmean(STA[year == 2025], "statins_current"))
+t1_alt <- data.table(
+  item  = c("HTN control among hypertensives, 2025 (HBP baseline_ctrl)", "TFA scenario baseline, 2025 (TFAS tfa_current)",
+            "NCD-RisC 2019 treated among hypertensives (unweighted mean of sexes)"),
+  value = c(wmean(HBP[year == 2025], "baseline_ctrl"), wmean(TFAS[year == 2025], "tfa_current"),
+            wmean(NCD[Year == 2019, .(location = Country, v = treated)][, .(v = mean(v)), by = location], "v", min_n = 100)))
+knitr::kable(data.table(item = names(t1_base), value = signif(t1_base, 6)), caption = "Table 1: reproduced baselines at full precision")
+knitr::kable(t1_alt[, .(item, value = signif(value, 3))], caption = "Table 1: alternative baselines (not used; for the authors)")
+
+# Static columns: legacy workbook T1_Scenarios!A3:G7 (author-written)
+t1 <- data.table(
+  Intervention = c("Improved Hypertension Control", "Population Sodium Reduction", "TFA Elimination", "Improved Statin Uptake"),
+  `Outcomes Impacted` = c("IHD, Ischemic Stroke, Hemorrhagic Stroke, Hypertensive Heart Disease",
+                          "IHD, Ischemic Stroke, Hemorrhagic Stroke, Hypertensive Heart Disease", "IHD", "IHD and Ischemic Stroke"),
+  RR = c("IR per 10 mmHg reduction in SBP (age-specific/SBP- specific)\nCF per 10 mmHg reduction in SBP\nCF/IR: 0.83 IHD\nCF/IR 0.73 stroke\nCF/IR 0.72 HHD",
+         "IR per 1 g/day reduction in sodium intake:\nIR: 0.83 IHD\nIR 0.73 stroke\nIR 0.72 HHD",
+         "CF: 1.07-1.21per 1 %E energy from industrial (Age dependent)",
+         "CF: 0.8 IHD Everybody. Ischemic stroke (100%) with atherosclerotic cause (60% fixed)\nIR: 0.78 Applied only to the proportion with Diabetes AF"),
+  `Risk population` = c("Adults 20 + y with hypertension", "Adults 20 +", "Adults 20 +", "Adults 40+ with prior IHD or stroke (secondary)"),
+  `Baseline level (2025)` = c("37 % of hypertensives treated to SBP < 140 mmHg",   # REPRO_PENDING: source not identified
+                              sprintf("Mean intake %s g/day", fmt_num(t1_base[["sodium"]], 1)),
+                              sprintf("%s%% of energy intake", fmt_num(100 * t1_base[["tfa"]], 1)),
+                              sprintf("%s %% coverage of statins as primary prevention", fmt_num(100 * t1_base[["statins"]], 0))),
+  Target = c("50 % controlled by 2040", "−30 % (2.9 g) by 2030", "0 % by 2028", "60 % by 2050"),
+  `Scale-up pattern` = rep("Linear", 4))
+t1_csv <- copy(t1)[, `:=`(baseline_value = c(NA, t1_base[["sodium"]], 100 * t1_base[["tfa"]], 100 * t1_base[["statins"]]),
+                          baseline_unit = c("% controlled (preserved)", "g/day", "% of energy", "% coverage"))]
+t1_status <- matrix("static_content", nrow(t1_csv), ncol(t1_csv), dimnames = list(NULL, names(t1_csv)))
+t1_status[, c("Baseline level (2025)", "baseline_value")] <- c(rep("preserved_pending", 1), rep("reproduced", 3))
+t1_disp <- copy(t1)[, RR := gsub(":; ", ": ", gsub("\r?\n", "; ", RR))]
+add_table("T1_Scenarios", t1_csv, t1_disp, t1_status, numfmt = c(baseline_value = "0.00"))
+```
+
+# 5. Results text, Table 2 and Discussion numbers
+
+Adapted from report chunks `out-tab-int-caut` (all-CVD totals), `out-tab-int-cau` (by cause; the TFA rows
+for stroke/HHD and the statin rows for ICH/HHD are dropped, as in the report), `1out-int-age` (sex and age)
+and `out-tab-loc` (regions). Percentages are deaths delayed / BAU deaths. All values are all-age unless the
+key says `u70`/`o70`, even where the text says "premature".
+
+```{r results-numbers}
+dd_all <- g(s_int, "dd", int = "All")
+scM("dd_all_total_M", dd_all, 1); scM("dd_all_total_M_r0", dd_all, 0)
+scP("dd_all_pct", g(s_int, "pct", int = "All"), 1); scP("dd_all_pct_r0", g(s_int, "pct", int = "All"), 0)
+scM("dd_all_per_year_M_1d", g(s_int, "per_year", int = "All"), 1)
+scM("dd_all_per_year_M_2d", g(s_int, "per_year", int = "All"), 2)
+scM("bau_total_M", g(s_int, "bau", int = "All"), 1)
+scM("proj_all_total_M", g(s_int, "proj", int = "All"), 1)
+for (cc in names(cause_map)) {
+  scM(sprintf("dd_%s_all_M", cc), g(s_cause, "dd", int = "All", cause = cc), 1)
+  scP(sprintf("pct_%s_all", cc), g(s_cause, "pct", int = "All", cause = cc), 1)
+}
+dd_stroke <- g(s_cause, "dd", int = "All", cause = "istroke") + g(s_cause, "dd", int = "All", cause = "hstroke")
+scM("dd_stroke_all_M", dd_stroke, 1)
+scP("share_ihd_stroke_pct", (g(s_cause, "dd", int = "All", cause = "ihd") + dd_stroke) / dd_all, 0)
+scM("dd_htn_total_M", g(s_int, "dd", int = "HTN"), 1); scM("dd_htn_total_M_r0", g(s_int, "dd", int = "HTN"), 0)
+scM("dd_sodium_total_M", g(s_int, "dd", int = "Sodium"), 1)
+scM("dd_statins_total_M", g(s_int, "dd", int = "Statins"), 1); scM("dd_statins_total_M_r0", g(s_int, "dd", int = "Statins"), 0)
+scM("dd_tfa_total_M", g(s_int, "dd", int = "TFA"), 1)
+
+# sex and age
+p_f <- g(s_sex, "pct", int = "All", sex = "Female"); p_m <- g(s_sex, "pct", int = "All", sex = "Male")
+p_sex <- sort(unique(formatC(100 * c(p_f, p_m), format = "f", digits = 0)))
+set_sc("pct_all_sex_common_r0", 100 * (p_f + p_m) / 2, paste(p_sex, collapse = "–"),
+       note = sprintf("women %.2f%%, men %.2f%%; a range when they round differently", 100 * p_f, 100 * p_m))
+scP("pct_all_female_r0", p_f, 0); scP("pct_all_male_r0", p_m, 0)
+scM("dd_all_female_M", g(s_sex, "dd", int = "All", sex = "Female"), 1)
+scM("dd_all_male_M", g(s_sex, "dd", int = "All", sex = "Male"), 1)
+p_u70 <- g(s_u70, "pct", int = "All", u70 = TRUE)
+scP("pct_all_u70_r0", p_u70, 0); scP("pct_all_o70_r0", g(s_u70, "pct", int = "All", u70 = FALSE), 0)
+scM("dd_all_u70_M", g(s_u70, "dd", int = "All", u70 = TRUE), 1)
+scM("dd_all_o70_M", g(s_u70, "dd", int = "All", u70 = FALSE), 1)
+p_all <- g(s_int, "pct", int = "All")
+set_sc("one_in_n_all", 1 / p_all, num_word(round(1 / p_all)))
+set_sc("one_in_n_u70", 1 / p_u70, num_word(round(1 / p_u70)))
+
+# regions
+for (r in c("ssa", "seao", "sa", "lac", "cee", "name")) scP(paste0("pct_all_reg_", r), reg_pct("All", r), 0)
+for (r in c("ssa", "seao", "sa")) scP(paste0("pct_htn_reg_", r), reg_pct("HTN", r), 0)
+scP("pct_sodium_reg_seao", reg_pct("Sodium", "seao"), 0); scP("pct_sodium_reg_sa", reg_pct("Sodium", "sa"), 0)
+oth <- s_reg[int == "Sodium" & !region %in% region_abbr[c("seao", "sa")]]
+set_sc("pct_sodium_reg_other_range", 100 * min(oth$pct), sprintf("%d–%d", floor(100 * min(oth$pct)), ceiling(100 * max(oth$pct))),
+       note = sprintf("min %.2f%% (%s), max %.2f%% (%s); floor(min)-ceiling(max)", 100 * min(oth$pct), oth[which.min(pct), region],
+                      100 * max(oth$pct), oth[which.max(pct), region]))
+for (r in c("lac")) scP(paste0("pct_statins_reg_", r), reg_pct("Statins", r), 0)
+for (r in c("name", "sa", "hi")) scP(paste0("pct_statins_reg_", r), reg_pct("Statins", r), 1)
+
+# hypertension, sodium, TFA, statins paragraphs
+scP("pct_htn", g(s_int, "pct", int = "HTN"), 1)
+scM("dd_htn_per_year_M_1d", g(s_int, "per_year", int = "HTN"), 1)
+for (cc in c("hstroke", "ihd", "istroke", "hhd")) scM(sprintf("dd_htn_%s_M", cc), g(s_cause, "dd", int = "HTN", cause = cc), 1)
+scM("dd_sodium_per_year_M_1d", g(s_int, "per_year", int = "Sodium"), 1)
+scP("pct_sodium", g(s_int, "pct", int = "Sodium"), 1)
+scM("dd_sodium_ihd_M", g(s_cause, "dd", int = "Sodium", cause = "ihd"), 1)
+scM("dd_sodium_istroke_M", g(s_cause, "dd", int = "Sodium", cause = "istroke"), 1)
+per_year_k <- function(x) round(x / 1e4) * 1e4
+set_sc("dd_tfa_per_year_k", g(s_int, "per_year", int = "TFA"), fmt_int(per_year_k(g(s_int, "per_year", int = "TFA"))))
+scP("pct_tfa", g(s_int, "pct", int = "TFA"), 1)
+scP("pct_tfa_u70_r0", g(s_u70, "pct", int = "TFA", u70 = TRUE), 0)
+set_sc("dd_statins_per_year_k", g(s_int, "per_year", int = "Statins"), fmt_int(per_year_k(g(s_int, "per_year", int = "Statins"))))
+scP("pct_statins", g(s_int, "pct", int = "Statins"), 1)
+scM("dd_statins_ihd_M", g(s_cause, "dd", int = "Statins", cause = "ihd"), 1)
+scP("pct_statins_ihd", g(s_cause, "pct", int = "Statins", cause = "ihd"), 1)
+scM("dd_statins_istroke_M", g(s_cause, "dd", int = "Statins", cause = "istroke"), 1)
+scP("pct_statins_istroke", g(s_cause, "pct", int = "Statins", cause = "istroke"), 1)
+scP("pct_statins_u70", g(s_u70, "pct", int = "Statins", u70 = TRUE), 1)
+scP("pct_statins_o70", g(s_u70, "pct", int = "Statins", u70 = FALSE), 1)
+
+# candidates printed for the pending TFA items (REPRO_PENDING [Results TFA paragraph] and [Discussion TFA])
+tfa_cand <- rbind(
+  summ("age_group", ints = "TFA")[, .(estimand = paste("TFA, age", age_group), pct = 100 * pct)],
+  s_u70[int == "TFA", .(estimand = ifelse(u70, "TFA, ages <70", "TFA, ages 70+ pooled"), pct = 100 * pct)],
+  s_reg[int == "TFA", .(estimand = paste("TFA, all-CVD,", region), pct = 100 * pct)],
+  summ("region", ints = "TFA", where = quote(cause == "ihd"))[, .(estimand = paste("TFA, IHD,", region), pct = 100 * pct)],
+  data.table(estimand = c("TFA, all-CVD, global, legacy 2025-2050 window", "TFA, IHD, global"),
+             pct = c(100 * summ(years = 2025L:yr_end, ints = "TFA")$pct, 100 * g(s_cause, "pct", int = "TFA", cause = "ihd"))))
+knitr::kable(tfa_cand[, .(estimand, pct = round(pct, 2))], caption = "Candidates for the pending TFA percentages")
+
+# Discussion: China sodium
+sod_cn <- g(SOD, "sodium_current", location = "China", year = 2025)
+pow_cn <- g(POW, "sodium_powles_2010", location = "China")
+set_sc("sodium_china_current_g", sod_cn, fmt_num(sod_cn, 2))
+set_sc("sodium_china_prev_g", pow_cn, fmt_num(pow_cn, 2))
+scP("sodium_china_share_pct", g(summ("location", ints = "Sodium"), "dd", int = "Sodium", location = "China") / g(s_int, "dd", int = "Sodium"), 0)
+scP("sodium_china_gbd23_vs_gbd10_pct", sod_cn / pow_cn - 1, 0)
+
+# Table 2
+t2_rows <- rbind(
+  data.table(cause = "all", int = int_table),
+  data.table(cause = "hhd", int = c("All", "HTN", "Sodium")),
+  data.table(cause = "hstroke", int = c("All", "HTN", "Sodium")),
+  data.table(cause = "ihd", int = int_table),
+  data.table(cause = "istroke", int = c("All", "HTN", "Sodium", "Statins")))
+t2_src <- rbind(copy(s_int)[, cause := "all"], s_cause, use.names = TRUE)
+t2 <- t2_src[t2_rows, on = .(cause, int)]
+check(nrow(t2) == nrow(t2_rows) && !anyNA(t2$dd), "Table 2 rows missing")
+t2_csv <- t2[, .(Cause = ifelse(cause == "all", "All CVDs", cause_map[cause]), Intervention = int_label[int],
+                 `Projected Deaths, Intervention (M)` = proj / 1e6, `Projected Deaths, Business as Usual (M)` = bau / 1e6,
+                 `Deaths Delayed (M)` = dd / 1e6, `Deaths Delayed per Year (M)` = per_year / 1e6, `Deaths Delayed (%)` = pct)]
+t2_disp <- t2_csv[, .(Cause, Intervention,
+                      `Projected Deaths, Intervention` = fmt_num(`Projected Deaths, Intervention (M)`, 1),
+                      `Projected Deaths, Business as Usual` = fmt_num(`Projected Deaths, Business as Usual (M)`, 1),
+                      `Deaths Delayed (#)` = fmt_num(`Deaths Delayed (M)`, 1),
+                      `Deaths Delayed per Year` = fmt_num(`Deaths Delayed per Year (M)`, 2),
+                      `Deaths Delayed (%)` = fmt_pct(`Deaths Delayed (%)`, 1))]
+add_table("T2_DeathsDelayed", t2_csv, t2_disp, "reproduced", bold = which(t2_csv$Intervention == "All Interventions"),
+          numfmt = c(`Projected Deaths, Intervention (M)` = "0.0", `Projected Deaths, Business as Usual (M)` = "0.0",
+                     `Deaths Delayed (M)` = "0.0", `Deaths Delayed per Year (M)` = "0.00", `Deaths Delayed (%)` = "0.0%"))
+
+# cause rows hidden in Table 2 (competing risks): why the TFA and statin cause rows do not sum to all-CVD
+hidden <- s_cause[!t2_rows, on = .(cause, int)][, .(int, cause, dd_M = round(dd / 1e6, 3))]
+knitr::kable(hidden, caption = "Cause rows not shown in Table 2 (negative = more deaths from that cause)")
+```
+
+# 6. Figure 1: deaths delayed over time
+
+Report chunk `output-tsplot`. The areas stack the four separate single-intervention effects; the top of
+the stack is their sum, not the simulated combined effect (`All`), and is not rescaled to match it.
+
+```{r fig1}
+f1 <- summ("year", ints = int_single)[, .(year, int, dd)]
+f1[, intervention := factor(int_label[int], levels = rev(int_label[int_single]))]
+setorder(f1, intervention, year)
+f1[, cum_dd := cumsum(dd), by = intervention]
+PD$fig1 <- f1[, .(year, intervention = as.character(intervention), dd, cum_dd)]
+fig1_theme <- theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom", legend.box = "horizontal", legend.title = element_text(size = 14, face = "bold"),
+        legend.text = element_text(size = 12), panel.grid.minor = element_blank())
+fig1 <- function(yvar) {
+  ggplot(f1, aes(x = year, y = .data[[yvar]], fill = intervention)) +
+    geom_area(position = "stack", colour = "grey20", linewidth = 0.2, alpha = 0.8) +
+    scale_y_continuous(labels = scales::comma) +
+    scale_fill_brewer(palette = "Set2") +
+    labs(title = "", x = "Year", y = "Deaths Delayed", fill = "") +
+    fig1_theme
+}
+save_fig(fig1("dd"), "fig1a_annual_deaths_delayed.png", 11, 6)
+save_fig(fig1("cum_dd"), "fig1b_cumulative_deaths_delayed.png", 11, 6)
+```
+
+# 7. Figure 2: deaths delayed by sex and age
+
+Report chunk `1out-int-age`.
+
+```{r fig2}
+f2 <- summ(c("age_group", "sex"))[, .(int, age_group, sex, dd)]
+f2[, intervention := factor(int_label[int], levels = int_label[s_int[order(dd), int]])]
+f2[, age_group := factor(age_group, levels = age_levels)]
+PD$fig2 <- f2[, .(intervention = as.character(intervention), age_group = as.character(age_group), sex, dd)]
+g2 <- ggplot(f2, aes(x = dd / 1e6, y = intervention, fill = age_group)) +
+  geom_col(width = 0.7) +
+  facet_wrap(~sex, nrow = 1) +
+  scale_x_continuous(expand = c(0, 0)) +
+  theme_minimal(base_size = 14) +
+  theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 1), strip.text = element_text(size = 16),
+        axis.title.x = element_text(size = 14), axis.text.y = element_text(size = 12), legend.position = "bottom",
+        legend.key.width = unit(1.2, "cm"), plot.margin = unit(c(1, 1.5, 1, 1), "cm")) +
+  labs(x = "Millions of deaths that could be delayed", y = NULL, fill = "Age group")
+save_fig(g2, "fig2_deaths_delayed_sex_age.png", 9, 5)
+```
+
+# 8. Figure 3: % deaths delayed by country and sex
+
+Report chunk `out-map-mx`, which despite its file names (`out_map_death_rate_*`) computes deaths delayed /
+BAU deaths x 100 for the combined scenario, as the caption says. Bins as in the report. Countries without
+model results are not drawn.
+
+```{r fig3}
+f3 <- summ(c("location", "sex"), ints = "All")[, .(location, sex, pct = 100 * pct)]
+f3[CD, iso3 := i.iso3, on = "location"]
+f3[, bin := cut(pct, breaks = c(-Inf, 9, 14, 19, 24, Inf), labels = c("5–9%", "10–14%", "15–19%", "20–24%", "25%+"))]
+PD$fig3 <- f3[, .(location, iso3, sex, pct, bin = as.character(bin))]
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+bins_col <- c("5–9%" = "#1a9850", "10–14%" = "#d9ef8b", "15–19%" = "#fee08b", "20–24%" = "#fc8d59", "25%+" = "#d73027")
+map_fig <- function(s) {
+  w <- merge(world, as.data.frame(f3[sex == s]), by.x = "adm0_a3", by.y = "iso3")
+  ggplot(w) +
+    geom_sf(aes(fill = bin), colour = "white", linewidth = 0.1) +
+    scale_fill_manual(values = bins_col, drop = FALSE, na.value = "grey90", name = sprintf("%% Reduction (%s)", s)) +
+    theme_minimal() +
+    labs(title = "", caption = "")
+}
+n_drawn <- sapply(c("Female", "Male"), function(s) sum(f3[sex == s, iso3] %in% world$adm0_a3))
+check(all(n_drawn >= length(locs) - 5), "Figure 3: too many countries missing from the map")
+save_fig(map_fig("Female"), "fig3a_map_pct_delayed_female.png", 9, 5)
+save_fig(map_fig("Male"), "fig3b_map_pct_delayed_male.png", 9, 5)
+fig3_range <- f3[, .(min = min(pct), max = max(pct)), by = sex]
+```
+
+# 9. Figure 4: deaths delayed by sex, age, region and intervention
+
+Report chunk `output-excel` (the `dt_out_5` dot plot saved as `out_deaths_disaggregation_bubble.png`):
+single interventions only, by sex, age group and region.
+
+```{r fig4}
+f4 <- rbindlist(list(
+  summ("sex", ints = int_single)[, .(int, disaggregation = "Sex", factor = sex, dd)],
+  summ("age_group", ints = int_single)[, .(int, disaggregation = "Age", factor = age_group, dd)],
+  summ("region", ints = int_single)[, .(int, disaggregation = "Region", factor = region, dd)]))
+f4[, factor_nested := factor(paste(disaggregation, factor, sep = " • "),
+                             levels = c(paste("Sex •", c("Female", "Male")), paste("Age •", age_levels),
+                                        paste("Region •", sort(unique(CD$region)))))]
+f4[, intervention := factor(int_label[int], levels = sort(int_label[int_single]))]
+check(!anyNA(f4$factor_nested), "Figure 4: unexpected factor levels")
+PD$fig4 <- f4[, .(intervention = as.character(intervention), disaggregation, factor, dd)]
+wrap22 <- function(x) vapply(x, function(s) paste(strwrap(s, 22), collapse = "\n"), "")
+g4 <- ggplot(f4, aes(x = dd, y = factor_nested, colour = intervention)) +
+  geom_point(alpha = 0.8, size = 4) +
+  scale_x_continuous(labels = scales::comma) +
+  scale_y_discrete(expand = expansion(mult = c(0.05, 0.15))) +
+  scale_colour_discrete(labels = wrap22) +
+  labs(x = "Deaths Delayed", y = "", colour = "") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom", legend.box = "vertical", legend.key.width = unit(18, "pt"),
+        legend.text = element_text(size = 11), plot.margin = margin(20, 30, 80, 20),
+        axis.text.y = element_text(margin = margin(r = 5)), panel.grid.major.y = element_line(linewidth = 0.3)) +
+  guides(colour = guide_legend(nrow = 2, byrow = TRUE)) +
+  coord_cartesian(clip = "off")
+save_fig(g4, "fig4_deaths_delayed_sex_age_region.png", 11, 7.5)
+```
+
+# 10. Table S1: countries by region
+
+Report chunk `output-countrylist`.
+
+```{r tableS1}
+ts1 <- CD[, .(Countries = paste(sort(location), collapse = ", ")), by = .(Region = region)][order(Region)]
+add_table("TS1_Regions", ts1, ts1, "reproduced")
+```
+
+# 11. Figure S1: risk-factor trajectories
+
+Report chunks `out-policy-bp` (second plot), `out-policy-salt`, `out-policy-tfa-scenarios`,
+`out-policy-statins`. Lines are restricted to the 190 modelled countries (the report used all rows of
+`HBP`, and filtered sodium/TFA to `covfxn2.csv` names, which dropped 16 modelled countries).
+
+```{r figS1}
+theme_s1 <- theme_minimal(base_size = 20) +
+  theme(plot.title = element_text(size = 28, face = "bold"), axis.title.x = element_text(size = 22, margin = margin(t = 16)),
+        axis.title.y = element_text(size = 22, margin = margin(r = 12)), axis.text = element_text(size = 20),
+        plot.margin = margin(t = 10, r = 10, b = 30, l = 10))
+x_s1 <- scale_x_continuous(breaks = seq(2020, 2050, 5), limits = c(2020, 2051), expand = c(0, 0))
+spag <- function(dt, y, title, ylab, ylim = NULL, th = theme_s1) {
+  p <- ggplot(dt, aes(x = year, y = .data[[y]], group = location)) +
+    geom_line(colour = "grey70", linewidth = 0.8, alpha = 0.7) + x_s1 + labs(title = title, x = "Year", y = ylab) + th
+  if (!is.null(ylim)) p <- p + scale_y_continuous(limits = ylim, expand = c(0, 0))
+  p
+}
+s1a <- HBP[location %in% locs][, ctrl := 100 * pmax(control_scaled, baseline_ctrl)]
+save_fig(spag(s1a, "ctrl", "Improved Hypertension Control", "Hypertension Control Rate (%)", c(0, 100)), "figS1a_traj_hypertension_control.png", 11, 6)
+s1b <- SOD[location %in% locs][, sodium := pmax(sodium_target_asp, 2)]
+save_fig(spag(s1b, "sodium", "Population Sodium Reduction", "Mean Sodium Intake in Grams per Day"), "figS1b_traj_sodium.png", 11, 6)
+s1c <- TFAS[location %in% locs & year >= 2019][, tfa := 100 * tfa_target]
+theme_s1c <- theme_minimal() + theme(plot.title = element_text(size = 28, face = "bold"), axis.title = element_text(size = 22), axis.text = element_text(size = 20))
+save_fig(spag(s1c, "tfa", "TFA Elimination", "Mean TFA Intake (%E)", th = theme_s1c), "figS1c_traj_tfa.png", 11, 6)
+s1d <- STA[location %in% locs][, statins := 100 * statins_uptake]
+save_fig(spag(s1d, "statins", "Improved Statin Uptake", "Risk Population with Statins Therapy (%)", c(0, 100)), "figS1d_traj_statins.png", 11, 6)
+```
+
+# 12. Figure S2: required and historical scale-up of hypertension control
+
+Report chunk `out-policy-bp-past` with the repo copy of the NCD-RisC file. The upper panel plots the
+required annual increase in percentage points (x 100): the report plotted proportions under a
+"pp/year" label.
+
+```{r figS2}
+aroc <- NCD[Year == 2019, .(controlled = mean(controlled)), by = .(Country, ISO)]
+for (ty in c(2030L, 2040L, 2050L)) aroc[, paste0("y", ty) := 100 * pmax(0, (mp$target_control - controlled) / (ty - yr_impl_start))]
+s2a <- melt(aroc, id.vars = c("Country", "ISO"), measure.vars = c("y2030", "y2040", "y2050"), variable.name = "target_year", value.name = "aroc")
+s2a[, target_year := sub("^y", "", target_year)]
+PD$figS2a <- s2a[, .(ISO, target_year, aroc)]
+g_s2a <- ggplot(s2a, aes(x = target_year, y = aroc, fill = target_year)) +
+  ggdist::stat_halfeye(adjust = 0.8, width = 0.6, justification = -0.25, alpha = 0.4, slab_colour = NA) +
+  ggbeeswarm::geom_beeswarm(aes(colour = target_year), size = 1.8, alpha = 0.7, priority = "density") +
+  scale_fill_brewer(palette = "Set2") + scale_colour_brewer(palette = "Set2") +
+  labs(x = "Target year", y = "Required annual increase in control (pp/year)") +
+  theme_classic(base_size = 13) + theme(legend.position = "none")
+save_fig(g_s2a, "figS2a_required_htn_scaleup.png", 9, 5)
+aroc_gt3 <- aroc[y2040 > 3, .N]
+
+ch <- copy(NCD)[order(Country, Sex, Year)]
+ch[, `:=`(diagnosed_change = 100 * (diagnosed - shift(diagnosed)), treated_change = 100 * (treated - shift(treated)),
+          controlled_change = 100 * (controlled - shift(controlled))), by = .(Country, Sex)]
+ch <- melt(ch[!is.na(diagnosed_change)], id.vars = c("Country", "ISO", "Sex", "Year"),
+           measure.vars = c("diagnosed_change", "treated_change", "controlled_change"), variable.name = "indicator", value.name = "change_pct")
+ch <- rbind(ch[Year >= 2000 & Year <= 2019][, period := "2000–2019"], ch[Year >= 2010 & Year <= 2019][, period := "2010–2019"])
+ch[, indicator_label := factor(sub("_change$", "", indicator), levels = c("diagnosed", "treated", "controlled"),
+                               labels = c("Diagnosed", "Treated", "Controlled"))]
+g_s2b <- ggplot(ch, aes(x = indicator_label, y = change_pct, fill = period)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3, position = position_dodge(width = 0.8)) +
+  facet_wrap(~Sex) +
+  labs(title = "Year-to-Year % Point Change in Hypertension Cascade Indicators",
+       subtitle = "Both comparison periods represented for each year", x = "Indicator", y = "Change (percentage points)", fill = "Period") +
+  theme_bw() + theme(strip.text = element_text(size = 12), axis.text.x = element_text(size = 11, angle = 30, hjust = 1))
+save_fig(g_s2b, "figS2b_historical_cascade_changes.png", 9, 5)
+```
+
+# 13. Figure S3: age-standardised mortality rates (REPRO_PENDING)
+
+```{r figS3}
+# REPRO_PENDING [Figure S3]: the legacy PNG is kept and not overwritten.
+# Report chunk `output-mortality` (ASMR part) standardises with the step weights in `who_std_report`, which are
+# not the WHO World Standard Population named in the caption, and divides deaths summed over the four cause
+# models by well + sick summed over the same four models (about 4x the population), for both the calibration
+# and projection periods. To update: supply verified standard-population weights, use one population copy per
+# stratum, add the figure here, then remove this marker.
+check(file.exists(file.path(dir_fig, "figS3_asmr_by_cause.png")), "legacy Figure S3 PNG is missing")
+```
+
+# 14. Figure S4 and Validation paragraph
+
+Report chunks `valida-ihme-foresight2` (deaths, reproduced) and `valida-ihme-foresight` (ASMR index,
+pending). Foresight files are the repo copies under `data-raw/GBD`; their footer cites GBD 2019 Foresight.
+
+```{r figS4}
+# REPRO_PENDING [Figure S4 top panel]: ASMR index uses the unverified `who_std_report` weights (see section 13).
+check(file.exists(file.path(dir_fig, "figS4a_asmr_index_vs_foresight.png")), "legacy Figure S4a PNG is missing")
+cause_code <- setNames(names(cause_map), cause_map)
+s4_obs <- BR[, .(deaths = sum(Nx * DIS.mx.t0)), by = .(year, cause = cause_code[cause])]
+s4_mod <- B[year >= yr_model_start, .(deaths = sum(bau)), by = .(year, cause)]
+s4_for <- FOR[year >= 2000, .(year, cause = cause_code[cause_of_death_or_injury], deaths = value, source = "GBD Foresight")]
+s4 <- rbind(rbind(s4_obs, s4_mod)[, source := "This Study"], s4_for)
+s4[, cause_label := cause_map[cause]]
+PD$figS4b <- s4[, .(year, cause, source, deaths)]
+g_s4b <- ggplot(s4, aes(x = year, y = deaths / 1e6, colour = source, group = source)) +
+  geom_line(data = s4[year <= 2019], linetype = "solid", linewidth = 1) +
+  geom_line(data = s4[year > 2019], linetype = "dashed", linewidth = 1) +
+  facet_wrap(~cause_label, scales = "free_y") +
+  theme_minimal(base_size = 14) +
+  labs(title = "Deaths| Global | Both sexes | Ages 20+ years", x = "Year", y = "Deaths (Million)", colour = "Source") +
+  theme(legend.position = "bottom", plot.title = element_text(face = "bold", size = 16))
+save_fig(g_s4b, "figS4b_deaths_vs_foresight.png", 11, 6)
+
+scM("val_bau_2050_M", B[year == 2050, sum(bau)], 0)
+scM("val_foresight_2050_M", FOR[year == 2050, sum(value)], 0)
+scM("val_unwpp_2050_M", UND[year == 2050, sum(deaths_unwpp)], 1)
+```
+
+# 15. Figure S5: all-cause deaths vs UN-WPP
+
+Report chunk `output-mortality`: UN-WPP deaths at ages 20+ for all locations in the file; this study =
+calibration deaths 2000-2018 (cause-specific + background, one population copy) and BAU `all.mx` from 2019,
+for the 190 modelled countries.
+
+```{r figS5}
+s5_obs <- merge(BR[, .(dx = sum(Nx * DIS.mx.t0)), by = .(year, sex)],
+                BR[cause == cause_map[["ihd"]], .(bg = sum(Nx * BG.mx.all)), by = .(year, sex)], by = c("year", "sex"))
+s5 <- rbind(s5_obs[, .(year, sex, deaths = dx + bg)], AC[, .(deaths = sum(all_mx)), by = .(year, sex)])[, source := "This study"]
+s5 <- rbind(s5, UND[year <= yr_end, .(deaths = sum(deaths_unwpp)), by = .(year, sex)][, source := "UNWPP 2024"])
+s5[, line_type := ifelse(year > 2019, "dashed", "solid")]
+PD$figS5 <- s5[, .(year, sex, source, deaths)]
+g_s5 <- ggplot(s5, aes(x = year, y = deaths / 1e6, colour = source, linetype = line_type)) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~sex) +
+  scale_colour_brewer(palette = "Dark2") +
+  scale_linetype_manual(values = c(solid = "solid", dashed = "dashed"), guide = "none") +
+  scale_x_continuous(limits = c(2000, 2051)) +
+  labs(title = "", x = "Year", y = "Deaths (Million)") +
+  theme_minimal(base_size = 24) +
+  theme(legend.position = "bottom", legend.title = element_blank(), strip.text = element_text(size = 24),
+        axis.text = element_text(size = 20), axis.title = element_text(size = 24))
+save_fig(g_s5, "figS5_deaths_vs_unwpp.png", 11, 6)
+```
+
+# 16. Comparison to previous work: text, Table S2 and Table S3
+
+"This study" columns from the outputs; Kontis et al. 2019 and Pickersgill et al. 2022 values are quoted
+from the papers (Kontis country values: Kontis et al. 2019, supplementary table, deaths delayed 2015-2040,
+thousands; also in `data-raw/Transversals/kontis-et-al-2019- supplemental.xlsx`); the "Kontis methods"
+replication column is preserved (no replication outputs in the repo).
+
+```{r comparison}
+# Table S2. Legacy workbook TS2_CompareIntervention!A3:E8. NA = not modelled.
+ts2_ext <- data.table(
+  int = c("HTN", "Sodium", "TFA", "Statins", "All"),
+  kontis_methods = c(40.9, 44, 4.2, 11, 95.3),    # REPRO_PENDING: Kontis-methods replication runs not in the repo
+  kontis         = c(39.4, 40, 14.8, NA, 94.3),   # Kontis et al. 2019, 2015-2040
+  pickersgill    = c(67.4, 24.1, NA, NA, 88.5))   # Pickersgill et al. 2022, 2022-2050
+scP("cmp_kontis_pct_higher", dd_all / 1e6 / ts2_ext[int == "All", kontis] - 1, 0)
+scP("cmp_pick_pct_higher", dd_all / 1e6 / ts2_ext[int == "All", pickersgill] - 1, 0)
+s_loc_all <- s_loc[int == "All"]
+scM("dd_all_china_M", g(s_loc_all, "dd", location = "China"), 1)
+scM("dd_all_india_M", g(s_loc_all, "dd", location = "India"), 1)
+scM("dd_all_usa_M", g(s_loc_all, "dd", location = "United States"), 1)
+ts2 <- copy(ts2_ext)[s_int, this_study := i.dd / 1e6, on = "int"]
+ts2_csv <- ts2[, .(Intervention = int_label[int], `This study (2026–2050)` = this_study,
+                   `This study – Kontis methods (2026–2050)` = kontis_methods,
+                   `Kontis et al. (2015–2040)` = kontis, `Pickersgill et al. (2022–2050)` = pickersgill)]
+comp_names <- function(first) c(first, "This study 2026–2050", "This study – Kontis methods 2026–2050",
+                                "Kontis et al. 2015–2040", "Pickersgill et al. 2022–2050")
+comp_disp <- function(dt, first) setnames(data.frame(dt[[1]], lapply(dt[, -1], fmt_num, d = 1), check.names = FALSE), comp_names(first))
+comp_status <- function(n) matrix(rep(c("static_content", "reproduced", "preserved_pending", "fixed_external", "fixed_external"), each = n), n, 5)
+add_table("TS2_CompareIntervention", ts2_csv, comp_disp(ts2_csv, "Intervention"), comp_status(nrow(ts2_csv)),
+          bold = which(ts2_csv$Intervention == "All Interventions"), numfmt = setNames(rep("0.0", 4), names(ts2_csv)[-1]))
+
+# Table S3. Legacy workbook TS3_CompareCountry!A3:E18 (the 15 countries and order follow Kontis et al.).
+ts3_ext <- data.table(
+  location = c("China", "India", "Indonesia", "Russian Federation", "United States", "Pakistan", "Brazil", "Bangladesh",
+               "Egypt", "Japan", "Philippines", "Ukraine", "Nigeria", "Mexico", "Myanmar"),
+  kontis_methods = c(30.6, 13.6, 6.9, 3.8, 1.1, 2.7, 1.5, 2, 1.5, 1, 1.6, 1.3, 1.7, 0.8, 1.6),  # REPRO_PENDING (replication runs)
+  kontis         = c(19.1, 16.7, 4, 4, 3.7, 3.1, 2.7, 2, 2.5, 1.4, 1.3, 1.6, 1.2, 1.3, 1.1),     # Kontis et al. 2019 suppl.
+  pickersgill    = c(27, 12, 3.7, 2.7, 0.4, 1.6, 0.9, 1.3, 1.2, 0.8, 1.1, 0.9, 1.5, 0.6, 0.8))  # Pickersgill et al. 2022
+check(all(ts3_ext$location %in% locs), "Table S3 countries missing from the model outputs")
+ts3 <- copy(ts3_ext)[s_loc_all, this_study := i.dd / 1e6, on = "location"]
+ts3_csv <- ts3[, .(Country = location, `This study (2026–2050)` = this_study,
+                   `This study – Kontis methods (2026–2050)` = kontis_methods,
+                   `Kontis et al. (2015–2040)` = kontis, `Pickersgill et al. (2022–2050)` = pickersgill)]
+add_table("TS3_CompareCountry", ts3_csv, comp_disp(ts3_csv, "Country"), comp_status(nrow(ts3_csv)),
+          numfmt = setNames(rep("0.0", 4), names(ts3_csv)[-1]))
+ts3_top15 <- s_loc_all[order(-dd)][1:15, location]
+```
+
+# 17. Table S4: model comparison (static)
+
+Author-written content; legacy workbook `TS4_ModelCompare!A3:D18`, kept verbatim.
+
+```{r tableS4}
+ts4 <- data.table(
+  Dimension = c("Modeling Approach", "Diseases Modeled (BP/Sodium)", "Business-as-Usual Scenario", "BP Risk Modeling",
+                "Hypertension Treatment Mechanism", "Treatment Effect Application", "Time Lag for BP Effects",
+                "Sodium Input & Units", "Sodium to SBP Mapping", "Sodium Effect Application", "Trans Fat (TFA) Target",
+                "TFA Effect Size", "Statins Scope", "Pros", "Cons"),
+  `This Study (Model A)` = c(
+    "Uses discrete BP categories with probability distributions; incidence is recalculated from GBD relative risks and Ettehad-based treatment effects; case fatality is modified separately.",
+    "IHD, ischemic stroke, hemorrhagic stroke, hypertensive heart disease; sodium reductions apply to the same CVD outcomes.",
+    "Includes background mortality improvements, age–sex–cause secular trends, and updated UN-WPP demographic changes.",
+    "Uses GBD relative risks by BP category, normalized to distribute baseline incidence across categories; trial effect sizes modify each category’s incidence.",
+    "Increases the share of individuals in controlled BP categories by scaling incremental coverage above baseline; applies category-specific trial effect sizes to incidence and CF.",
+    "Lowers disease incidence (via trial-based category-specific incidence reductions) and lowers case fatality.",
+    "No explicit lag; changes evolve annually via linear scale-up trajectories.",
+    "Accepts sodium or salt; converts automatically; supports target or percent reductions.",
+    "Uses Filippini coefficients: 2.8 mmHg per gram for raised BP, 1.0 mmHg for normotensive, scaled by population distribution.",
+    "Reduces incidence via SBP trials mapping; no effect on case fatality.",
+    "Eliminates industrial TFA to 0% energy; applies to IHD case fatality.",
+    "Applies to adults 40+ with IHD or ischemic stroke; reduces both incidence and case fatality using formulas.",
+    "Uses discrete blood pressure (BP) categories with probability distributions; incidence is recalculated from GBD relative risks and trial-based treatment effects; case fatality is modified separately.",
+    "IHD, ischemic stroke, hemorrhagic stroke, hypertensive heart disease; sodium reductions apply to the same CVD outcomes.",
+    "Includes background mortality improvements, age–sex–cause secular trends, and updated UN-WPP demographic changes."),
+  `Kontis et al. 2019 (Model B)` = c(
+    "Uses average SBP and age-specific risk relationships; calculates impact of sodium on SBP, then on disease risk.",
+    "Includes all this study diseases plus CKD, stomach cancer, and other CVDs.", "No built-in improvements.",
+    "Uses age-specific risk per unit SBP increase.", "Reduces average SBP by a fixed amount in treated individuals.",
+    "Affects only cause-specific mortality rates.", "Includes up to 10-year lag with linear ramp.", "Uses sodium directly.",
+    "Uses fixed mmHg reductions from meta-analysis.", "Reduces mortality via SBP and risk mapping.", "0.5% of energy intake.",
+    "Same formula applied to IHD mortality.", "Not included.",
+    "Simple and clean continuous modeling; includes time lags and optimal SBP floors.",
+    "Only affects mortality, possibly underestimating prevention benefits."),
+  `Key Differences / Notes` = c(
+    "Model A uses categorical BP levels; Model B uses continuous SBP values.", "Model B covers more conditions.",
+    "Model A accounts for secular trends; Model B does not.", "Model A is categorical; Model B is continuous.",
+    "Model A redistributes categories; Model B lowers SBP directly.", "Model A explicitly considers the impact of preventing CVD.",
+    "Lag handling differs.", "Both converge to salt; Model A allows unit switching.",
+    "Model B uses standardized anchors; Model A uses custom coefficients.", "Model A focuses on prevention; Model B on mortality reduction.",
+    "Different policy targets, same methods", "Identical math; only targets differ.", "Model A includes statins; Model B does not.",
+    "Each model suits different policy needs/asesments.", "Trade-offs in scope and realism."))
+add_table("TS4_ModelCompare", ts4, ts4, "static_content")
+```
+
+# 18. Tables S5, S6 and S7
+
+Report block `ADD: <70 outputs` and chunk `out-tab-loc`. Table S5 and S6 percentages follow their notes:
+deaths delayed before age 70 / all deaths delayed for that intervention and sex (S5) or country (S6).
+Table S6 selects the 30 countries with the largest BAU adult population (20-95, one cause copy) in 2025
+and keeps the legacy row order (deaths delayed <70, descending).
+
+```{r tablesS5-S7}
+s_sexu70 <- summ(c("sex", "u70"))
+ts5 <- CJ(sex = c("Female", "Male"), int = int_table, sorted = FALSE)
+ts5[, dd_u70 := mapply(function(s, i) g(s_sexu70, "dd", sex = s, int = i, u70 = TRUE), sex, int)]
+ts5[, dd_all := mapply(function(s, i) g(s_sex, "dd", sex = s, int = i), sex, int)]
+ts5[, share_u70 := dd_u70 / dd_all]
+ts5_csv <- ts5[, .(Intervention = int_label[int], Sex = sex, `Deaths Delayed (#)` = dd_u70, `Deaths Delayed (<70 years %)` = share_u70)]
+ts5_disp <- data.frame(Intervention = ts5_csv$Intervention, Sex = blank_repeats(ts5_csv$Sex),
+                       "Deaths Delayed (#)" = fmt_int(ts5_csv$`Deaths Delayed (#)`),
+                       "Deaths Delayed (<70 years %)" = fmt_pct(ts5_csv$`Deaths Delayed (<70 years %)`, 1), check.names = FALSE)
+add_table("TS5_Premature_Sex", ts5_csv, ts5_disp, "reproduced", bold = which(ts5_csv$Intervention == "All Interventions"),
+          numfmt = c(`Deaths Delayed (#)` = "#,##0", `Deaths Delayed (<70 years %)` = "0.0%"))
+
+pop25 <- AC[year == 2025, .(population = sum(pop)), by = location][order(-population)]
+top30 <- pop25[1:30, location]
+s_locu70 <- summ(c("location", "u70"), ints = "All")
+ts6 <- s_locu70[location %in% top30, .(dd_u70 = sum(dd[u70]), dd_all = sum(dd)), by = location][, share := dd_u70 / dd_all][order(-dd_u70)]
+ts6_csv <- ts6[, .(Location = location, `Projected Deaths Delayed <70 years` = dd_u70, `Share of delayed deaths occurring <70 years (%)` = share)]
+ts6_disp <- data.frame(Location = ts6_csv$Location, "Projected Deaths Delayed <70 years" = fmt_int(ts6_csv[[2]]),
+                       "Share of delayed deaths occurring <70 years (%)" = fmt_pct(ts6_csv[[3]], 1), check.names = FALSE)
+add_table("TS6_Premature_Top30", ts6_csv, ts6_disp, "reproduced",
+          numfmt = c(`Projected Deaths Delayed <70 years` = "#,##0", `Share of delayed deaths occurring <70 years (%)` = "0.0%"))
+
+ts7 <- s_loc_all[order(region, location)]
+ts7_csv <- ts7[, .(Location = location, Region = region, `Projected Deaths` = proj, `Baseline Deaths` = bau,
+                   `Deaths Delayed` = dd, `Deaths Delayed per Year` = per_year, `% Delayed` = pct)]
+ts7_disp <- ts7_csv[, .(Location, `Projected Deaths` = fmt_int(`Projected Deaths`), `Baseline Deaths` = fmt_int(`Baseline Deaths`),
+                        `Deaths Delayed` = fmt_int(`Deaths Delayed`), `Deaths Delayed per Year` = fmt_int(`Deaths Delayed per Year`),
+                        `% Delayed` = fmt_pct(`% Delayed`, 0))]
+add_table("TS7_ByCountry", ts7_csv, ts7_disp, "reproduced",
+          numfmt = c(`Projected Deaths` = "#,##0", `Baseline Deaths` = "#,##0", `Deaths Delayed` = "#,##0",
+                     `Deaths Delayed per Year` = "#,##0", `% Delayed` = "0%"))
+```
+
+# 19. Table S8 and the Sensitivity analysis paragraph
+
+```{r tableS8}
+# REPRO_PENDING [Table S8 + Sensitivity analysis paragraph]: values from the legacy workbook TS8_Sensitivity!A3:G23.
+# The alternative-trend simulations (LC trends, no trends, IHME Foresight trends) are not in the repo. The
+# base rows ("Background and CVD trend*80%") are the main scenario and are regenerated from the outputs on
+# the legacy 2025-2050 window (yr_s8_start), the window of the preserved rows, so they differ from Table 2
+# (2026-2050) in projected, baseline and %. "Per year" divides by 24 in the legacy table (Table 2: 25) and
+# stays legacy in every row. Move the whole table to 2026-2050 once the alternative runs are available.
+ts8_leg <- data.table(
+  trend = rep(c("Background and CVD trend*80%", "Background and CVD trend LC", "No background and no CVD trend", "IHME Foresight trends"), each = 5),
+  int = rep(c("HTN", "Sodium", "TFA", "Statins", "All"), 4),
+  proj = c(621.8, 659.9, 691.7, 685.3, 578.1, 621.1, 659.3, 690.9, 684.4, 577.7, 610.7, 647.4, 679, 672.7, 567.5, 498.6, 532.3, 561.1, 556.2, 462.3),
+  bau  = rep(c(696.2, 695.4, 683.4, 564.6), each = 5),
+  dd   = c(74.4, 36.3, 4.5, 10.9, 118.1, 74.3, 36.1, 4.5, 10.9, 117.7, 72.8, 36, 4.4, 10.7, 115.9, 66, 32.3, 3.6, 8.4, 102.3),
+  per_year = c(3.1, 1.5, 0.2, 0.5, 4.9, 3.1, 1.5, 0.2, 0.5, 4.9, 3, 1.5, 0.2, 0.4, 4.8, 2.7, 1.3, 0.1, 0.4, 4.3),
+  pct  = c(0.107, 0.052, 0.006, 0.016, 0.17, 0.107, 0.052, 0.006, 0.016, 0.169, 0.106, 0.053, 0.006, 0.016, 0.17, 0.117, 0.057, 0.006, 0.015, 0.181))
+ts8 <- copy(ts8_leg)
+base <- ts8$trend == "Background and CVD trend*80%"
+s_int_s8 <- summ(years = yr_s8_start:yr_end)
+ts8[base, c("proj", "bau", "dd", "pct") := s_int_s8[match(ts8$int[base], int), .(proj / 1e6, bau / 1e6, dd / 1e6, pct)]]
+ts8_csv <- ts8[, .(`Mortality Trend Modeling` = trend, Intervention = int_label[int], `Projected Deaths (M)` = proj,
+                   `Baseline Deaths (M)` = bau, `Deaths Delayed (M)` = dd, `Deaths Delayed per Year (M)` = per_year, `Deaths Delayed (%)` = pct)]
+ts8_status <- matrix("preserved_pending", nrow(ts8_csv), ncol(ts8_csv))
+ts8_status[, 1:2] <- "static_content"
+ts8_status[base, c(3, 4, 5, 7)] <- "reproduced"
+ts8_disp <- data.frame("Mortality Trend Modeling" = esc_md(blank_repeats(ts8_csv[[1]])), Intervention = ts8_csv$Intervention,
+                       "Projected Deaths" = fmt_num(ts8_csv[[3]], 1), "Baseline Deaths" = ifelse(duplicated(ts8_csv[[1]]), "", fmt_num(ts8_csv[[4]], 1)),
+                       "Deaths Delayed" = fmt_num(ts8_csv[[5]], 1), "Deaths Delayed per Year" = fmt_num(ts8_csv[[6]], 1),
+                       "Deaths Delayed (%)" = fmt_num(100 * ts8_csv[[7]], 1), check.names = FALSE)
+add_table("TS8_Sensitivity", ts8_csv, ts8_disp, ts8_status,
+          numfmt = c(`Projected Deaths (M)` = "0.0", `Baseline Deaths (M)` = "0.0", `Deaths Delayed (M)` = "0.0",
+                     `Deaths Delayed per Year (M)` = "0.0", `Deaths Delayed (%)` = "0.0%"))
+```
+
+# 20. Table S9 and the math-supplement tables (static) with a check against the model code
+
+Table S9: legacy workbook `TS9_Assumptions!A3:C8`. The five math pipe tables stay inline in the
+manuscript (so the LaTeX renders); their text is copied verbatim below, exported to CSV and checked
+against the constants in `code/7. model_100_multiplicative_func_new3_gbd23_noaroc.R`.
+
+```{r tableS9-math}
+ts9 <- data.table(
+  Domain = c("(i) Memoryless Property & Tunnel States", "(ii) Stratification by Age, Sex, Time", "(iii) Competing Risks Handling",
+             "(iv) Dependence and Independence Assumptions", "(v) Rationale for Multiplicative Combination of Effects"),
+  Assumption = c("Models are memoryless; no tunnel states used.",
+                 "Models stratified by single-year age groups (20–95+), sex (female/male), and calendar year (2019–2050).",
+                 "Cause-specific Markov models with parallel runs; deaths from other causes modeled after cause-specific.",
+                 "Interventions modeled as independent.",
+                 "Combined intervention effects are calculated multiplicatively across risk pathways."),
+  `Rationale / Notes` = c(
+    "Each individual’s transition depends only on their current state (Markov assumption). Transition probabilities are updated annually by age and risk exposure, implicitly accounting for time-varying hazards.",
+    "Age- and sex-specific risk and mortality rates vary significantly across causes. Temporal stratification allows modeling secular trends and intervention scale-up.",
+    "For each cause (IHD, ischemic stroke, hemorrhagic stroke, hypertensive heart disease), we simulate transitions including cause-specific mortality and 'other-cause death' as competing absorbing states. Final cause-of-death aggregation is mutually exclusive.",
+    "Assumes conditional independence among risk–disease pathways.",
+    "Consistent with standard epidemiologic formulation of IR/CF ratios under multiplicative risk assumptions. Avoids overestimating combined effect size vs. additive assumptions; conservative in presence of overlapping risk reductions."))
+add_table("TS9_Assumptions", ts9, ts9, "static_content")
+
+# Math-supplement pipe tables, verbatim from manuscript/manuscript-100mlives2.Rmd (captions kept there).
+math_md <- list(
+  Math_CF_ReductionFactors = list(caption = "Case fatality reduction factors per unit control", md = r"---(
+| Cause | CF Reduction Factor ($\rho_{CF}$) |
+|-------|-----------------------------------|
+| IHD | 0.24 |
+| Ischemic stroke | 0.36 |
+| Hemorrhagic stroke | 0.76 |
+| HHD | 0.20 |
+)---"),
+  Math_TFA_RR = list(caption = "Age-specific relative risks for trans fat intake", md = r"---(
+| Age Group | RR per 1% |
+|-----------|-----------|
+| 20-24 | 1.21 |
+| 25-29 | 1.20 |
+| 30-34 | 1.19 |
+| 35-39 | 1.18 |
+| 40-44 | 1.17 |
+| 45-49 | 1.16 |
+| 50-54 | 1.15 |
+| 55-59 | 1.14 |
+| 60-64 | 1.13 |
+| 65-69 | 1.11 |
+| 70-74 | 1.10 |
+| 75-79 | 1.09 |
+| 80+ | 1.07 |
+)---"),
+  Math_Statin_RR = list(caption = "Statin relative risks used in the model", md = r"---(
+| Outcome | RR (Incidence) | RR (Case Fatality) |
+|---------|----------------|---------------------|
+| IHD | 0.74 | 0.80 |
+| Ischemic stroke | 0.80 | 0.96 |
+)---"),
+  Math_TransitionRates = list(caption = "Annual transition rates in the multi-state model", md = r"---(
+| Transition | Rate |
+|------------|------|
+| Well → Sick | $IR_{\text{new}}(a,s,c,t) = IR(a,s,c,t) \times \varepsilon_{IR}$ |
+| Sick → Dead (disease) | $CF_{\text{new}}(a,s,c,t) = CF(a,s,c,t) \times \varepsilon_{CF}$ |
+| Well → Dead (background) | $BG.mx(a,s,c,t)$ |
+| Sick → Dead (background) | $BG.mx(a,s,c,t)$ |
+| All → Dead (COVID-19) | $covid.mx(a,s,t)$ (2020-2021 only) |
+)---"),
+  Math_Notation = list(caption = "Comprehensive mathematical notation for all model components", md = r"---(
+| Symbol | Description |
+|--------|-------------|
+| *Core Variables* | |
+| $a, s, c, t, \ell$ | Age, sex, cause, time (year), location |
+| $\text{BP}_{\text{cat}}$ | Blood pressure category |
+| $IR_{\text{original}}, CF_{\text{original}}$ | Baseline -Business as usual- incidence rate and case fatality rate (inputs to the transition model) |
+| $IR_{\text{new}}, CF_{\text{new}}$ | Post-intervention incidence rate and case fatality rate |
+| $W, K, D$ | Well, sick, dead populations |
+| $N$ | Total population |
+| *Antihypertensive Therapy (BP Control)* | |
+| $C_{\text{baseline}}, C_{\text{target}}$ | Baseline and target hypertension control rates |
+| $C_0, C_t$ | Baseline coverage and coverage at time $t$ |
+| $\Delta C_{\text{target}}$ | Total required incremental change to reach target |
+| $\Delta C_{\text{increment}}$ | Time-varying annual incremental coverage (scale-up path) |
+| $\Delta C_{\text{delta}}$ | Coverage delta at time $t$ ($C_t - C_0$) |
+| $C_{\text{agg}}^{\Delta}$ | Aggregate incremental coverage for modifying CF |
+| $P(\text{BP}_{\text{cat}})$ | Distribution of population across BP categories |
+| $w_{\text{DM}}$ | Diabetes prevalence weight applied to Ettehad effects |
+| $E_{\text{trial}}$ | Ettehad effect size per 10 mmHg SBP reduction |
+| $RR_{\text{GBD}}$ | GBD relative risk per 10 mmHg SBP increase |
+| $\alpha_{\text{inc}}$ | Incidence normalization factor to anchor baseline IR |
+| $\rho_{CF}$ | Case-fatality reduction factor per unit coverage gained |
+| $\varepsilon_{IR,\text{BP}}, \varepsilon_{CF,\text{BP}}$ | BP-control effect ratios applied to $IR_{\text{original}}$ and $CF_{\text{original}}$ |
+| $T_{\text{start}}, T_{\text{end}}$ | Scale-up start and end years |
+| $\Delta SBP_{\text{treated}}$ | Expected SBP reduction among newly controlled hypertensives |
+| $f_{\text{scale}}(t)$ | Generic scale-up function mapping $t$ to $C_t$ |
+| *Sodium Reduction* | |
+| $S_{\text{current}}, S_{\text{target}}$ | Current and target sodium intake (g/day) |
+| $S_{\text{eff}}$ | Sodium reduction parameter |
+| $S_{\text{reduction}}$ | Time-varying sodium reduction |
+| $\Delta SBP$ | Blood pressure reduction from sodium |
+| $\phi_{\text{hyp}}$ | Proportion with raised BP |
+| $T_{\text{salt,start}}, T_{\text{salt,end}}$ | Sodium intervention start and end years |
+| $E^{IR}_{\text{sodium}}$ | Sodium-mediated intermediate proportional reduction in incidence (BP-bin specific, if indexed) |
+| $\varepsilon_{IR,\text{sodium}}$ | Sodium incidence effect ratio passed to the transition model |
+| $\varepsilon_{CF,\text{sodium}}$ | Sodium case-fatality effect ratio (set to 1 in this model) |
+| *Trans Fat Policy* | |
+| $TFA_{\text{current}}, TFA_{\text{target}}$ | Current and target trans fat intake (% energy) |
+| $\Delta TFA$ | Trans fat reduction |
+| $RR_{\text{TFA}}$ | Age-specific RR per 1% trans fat |
+| $E_{\text{TFA}}$ | TFA intermediate proportional reduction in IHD case fatality |
+| $T_{\text{TFA,start}}$ | TFA policy start year |
+| $\varepsilon_{IR,\text{TFA}}$ | TFA incidence effect ratio (set to 1 in this model) |
+| $\varepsilon_{CF,\text{TFA}}$ | TFA case-fatality effect ratio (IHD only; 1 otherwise) |
+| *Statin Therapy* | |
+| $U_{0,\ell}$ | Baseline statin coverage at $T_{\text{stat,start}}$ (coverage already in place) |
+| $U_{\text{target}}$ | Target total statin coverage by $T_{\text{stat,end}}$ |
+| $\Delta U(t,\ell)$ | Incremental statin coverage above baseline at time $t$ |
+| $T_{\text{stat,start}}, T_{\text{stat,end}}$ | Statin scale-up start and end years |
+| $\alpha_{IR}, \alpha_{CF}$ | Adherence for incidence (primary) and case fatality (secondary) effects |
+| $AF_{c,\ell}$ | Cause- and location-specific attributable fraction (used for incidence only) |
+| $\psi_{\text{athero}}$ | Proportion of ischemic stroke that is atherosclerotic (applies to CF only) |
+| $RR^{IR}_{c}, RR^{CF}_{c}$ | Trial-based relative risks for incidence and case fatality |
+| $\delta^{IR}_{c}, \delta^{CF}_{c}$ | Risk reductions $=1-RR$ for incidence and case fatality |
+| $E^{IR}_{c,\ell}(t), E^{CF}_{c,\ell}(t)$ | Incremental effect sizes applied to $IR$ and $CF$ (baseline-adjusted denominators) |
+| $\varepsilon_{IR,\text{statin}}, \varepsilon_{CF,\text{statin}}$ | Statin effect ratios passed to the transition model |
+| *Combined Effects* | |
+| $\varepsilon_{IR,j}, \varepsilon_{CF,j}$ | Generic effect ratios for intervention $j\in\{\text{BP},\text{sodium},\text{TFA},\text{statin}\}$ |
+| $\varepsilon_{IR,\text{total}}, \varepsilon_{CF,\text{total}}$ | Combined effect ratios (multiplicative across interventions) |
+| *State Transition Model* | |
+| $BG.mx, BG.mx.all$ | Background mortality (cause-specific, all-cause) |
+| $covid.mx$ | COVID-19 mortality (2020--2021) |
+| $\text{PREV}$ | Baseline disease prevalence |
+| $\text{DIS.mx}$ | Baseline disease mortality |
+| $\text{ALL.mx}$ | All-cause mortality |
+)---"))
+parse_pipe <- function(md) {
+  ln <- trimws(strsplit(trimws(md), "\n", fixed = TRUE)[[1]])
+  ln <- ln[!grepl("^\\|[-: |]+\\|$", ln)]
+  cells <- lapply(ln, function(l) trimws(strsplit(sub("^\\|", "", sub("\\|$", "", l)), "|", fixed = TRUE)[[1]]))
+  k <- length(cells[[1]])
+  body <- lapply(cells[-1], function(r) { length(r) <- k; r[is.na(r)] <- ""; r })
+  setnames(as.data.table(do.call(rbind, body)), cells[[1]])
+}
+math_tab <- lapply(math_md, function(m) parse_pipe(m$md))
+# the verbatim copies must still match the manuscript's inline tables
+ms_txt <- paste(readLines(rp("manuscript", "manuscript-100mlives2.Rmd"), warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+math_in_ms <- vapply(math_md, function(m) grepl(trimws(m$md), ms_txt, fixed = TRUE), logical(1))
+
+# ---- Parameter check: manuscript tables/text vs the model code ----
+cf_line <- grep("cf_reduction_per_control = c\\(", mc_txt, value = TRUE)[1]
+cf_mc <- as.numeric(strsplit(sub(".*c\\(([^)]*)\\).*", "\\1", cf_line), ",")[[1]])
+tfa_lines <- grep("^\\s*age >= [0-9]+( & age <= [0-9]+)?, [0-9.]+,", mc_txt, value = TRUE)
+tfa_mc <- as.numeric(sub(".*, ([0-9.]+),\\s*$", "\\1", tfa_lines))
+ett_tot <- ETT[SBP_Category == "Total" & Cause %in% c("Coronary heart disease", "Stroke", "Heart failure"), setNames(RR, Cause)]
+param_chk <- data.table(
+  item = c(paste("CF reduction factor", c("IHD", "Ischemic stroke", "Hemorrhagic stroke", "HHD")),
+           paste("TFA RR", math_tab$Math_TFA_RR$`Age Group`),
+           "Statin RR incidence IHD", "Statin RR incidence ischemic stroke", "Statin RR CF IHD", "Statin RR CF ischemic stroke",
+           "Statin psi_athero", "CF cap", "IR cap", "covid.mx cap",
+           "Table 1 statin IR RR", "Table 1 RR CF/IR IHD (Ettehad total)", "Table 1 RR stroke (Ettehad total)", "Table 1 RR HHD (Ettehad total)",
+           "Math text: alpha_IR default", "Math text: alpha_CF default", "Math text: HTN T_start default", "Math text: HTN T_end default",
+           "Math text: T_salt,start default", "Math text: T_TFA,start default", "Math text: w_DM default",
+           "Abstract/Table 1: HTN target", "Abstract/Table 1: HTN target year", "Abstract/Table 1: sodium reduction",
+           "Abstract/Table 1: sodium target year", "Table 1: TFA target year", "Abstract/Table 1: statin target", "Abstract/Table 1: statin target year"),
+  manuscript = c(as.numeric(math_tab$Math_CF_ReductionFactors[[2]]), as.numeric(math_tab$Math_TFA_RR[[2]]),
+                 as.numeric(math_tab$Math_Statin_RR[[2]]), as.numeric(math_tab$Math_Statin_RR[[3]]), 0.60, 0.99, 0.99, 0.9,
+                 0.78, 0.83, 0.73, 0.72, 1, 1, 2025, 2050, 2025, 2027, 0.1, 0.5, 2040, 0.3, 2030, 2028, 0.6, 2050),
+  model_code = c(cf_mc[1:4], tfa_mc,
+                 mc_num("rr_ir_ihd\\s*<-\\s*([0-9.]+)"), mc_num("rr_ir_istroke\\s*<-\\s*([0-9.]+)"),
+                 mc_num("rr_cf_ihd\\s*<-\\s*([0-9.]+)"), mc_num("rr_cf_istroke\\s*<-\\s*([0-9.]+)"),
+                 mc_num("prop_athero_stroke\\s*=\\s*([0-9.]+)"),
+                 mc_num("intervention_rates\\[CF > ([0-9.]+), CF"), mc_num("intervention_rates\\[IR > ([0-9.]+), IR"),
+                 mc_num("b_rates\\[covid\\.mx>=1, covid\\.mx:=([0-9.]+)\\]"),
+                 mc_num("rr_ir_ihd\\s*<-\\s*([0-9.]+)"), ett_tot[["Coronary heart disease"]], ett_tot[["Stroke"]], ett_tot[["Heart failure"]],
+                 mp$adherence_ir, mp$adherence_cf, mp$control_start_year, mp$control_target_year, mp$saltyear1,
+                 mp$tfa_policy_start_year, NA, mp$target_control, mp$control_target_year, mp$salteff, mp$saltyear2,
+                 mp$tfa_policy_start_year, mp$statin_target_coverage, mp$statin_target_year),
+  model_note = c(rep("", 4 + length(tfa_mc) + 8), "model: 0.74 IHD and 0.80 ischemic stroke incidence",
+                 "category RRs used in the model; totals shown in Table 1", "", "",
+                 "run value (function default 1)", "run value (function default 1)", "run value", "run value", "run value",
+                 "run value (function default 2027)", "country-specific diabetes prevalence in the run (function default 0.1)",
+                 rep("run value", 7)))
+check(length(tfa_mc) == nrow(math_tab$Math_TFA_RR), "TFA RR lines in the model code do not match the table length")
+param_chk[, match := ifelse(is.na(model_code), "n/a", ifelse(abs(manuscript - model_code) < 1e-9, "yes", "NO"))]
+knitr::kable(param_chk, caption = "Manuscript parameter values vs model code")
+knitr::kable(data.table(table = names(math_in_ms), verbatim_in_manuscript = math_in_ms), caption = "Math tables still verbatim in the manuscript")
+cat(sprintf("Methods claim check: %d NCD-RisC countries need more than 3 pp/year to reach 50%% by 2040 (max %.2f).\n",
+            aroc_gt3, max(aroc$y2040)))
+```
+
+# 21. Scalars: assemble, check and save
+
+```{r scalars}
+inv_sc <- inventory[type == "scalar"]
+missing_sc <- setdiff(inv_sc[status == "reproduced", id], names(SC))
+check(length(missing_sc) == 0, paste("reproduced scalars not computed:", paste(missing_sc, collapse = ", ")))
+check(length(setdiff(names(SC), inv_sc$id)) == 0, "scalars computed but not in the inventory")
+scalars <- inv_sc[, .(key = id, status, unit, location, legacy, source = paste0(inputs, " | ", chunk), filters, method, pending)]
+scalars[, value := vapply(key, function(k) if (is.null(SC[[k]])) NA_real_ else SC[[k]]$value, numeric(1))]
+scalars[, display := vapply(seq_len(.N), function(i) if (is.null(SC[[key[i]]])) legacy[i] else SC[[key[i]]]$display, character(1))]
+scalars[, note := vapply(key, function(k) if (is.null(SC[[k]])) "" else SC[[k]]$note, character(1))]
+scalars[status != "reproduced", value := suppressWarnings(as.numeric(gsub(",", "", legacy)))]
+scalars[, window := fifelse(status == "reproduced" & grepl("/ 25", method), sprintf("%d-%d (25 implementation years)", yr_impl_start, yr_end),
+                     fifelse(status == "reproduced", sprintf("%d-%d (cumulative)", yr_cum_start, yr_end), ""))]
+setcolorder(scalars, c("key", "value", "display", "unit", "status", "source", "location", "window", "filters", "method", "pending", "note", "legacy"))
+save_rds(scalars[, !"legacy"], "scalars.rds")
+```
+
+# 22. Tables, plot data, provenance: save
+
+```{r save-tables}
+status_summary <- function(st, cols) {
+  apply(st, 1, function(r) if (length(unique(r)) == 1) r[1] else paste(sprintf("%s=%s", cols, r), collapse = "; "))
+}
+for (sh in names(TB)) {
+  x <- copy(TB[[sh]]$csv)
+  x[, status := status_summary(TB[[sh]]$status, names(TB[[sh]]$csv))]
+  fwrite(x, file.path(dir_tab, paste0(sh, ".csv")))
+}
+for (nm in names(math_tab)) fwrite(copy(math_tab[[nm]])[, status := "static_content"], file.path(dir_tab, paste0(nm, ".csv")))
+tables_display <- lapply(TB, function(t) list(df = t$display, bold = t$bold))
+save_rds(tables_display, "tables_display.rds")
+save_rds(PD, "plot_data.rds")
+
+# provenance: inventory, inputs (md5), settings, session
+md5 <- function(f) unname(tools::md5sum(f))
+mo_md5 <- md5(mo_files)
+tf <- tempfile(); writeLines(paste(basename(mo_files), mo_md5), tf)
+inputs_md5 <- rbind(
+  data.table(file = "output/out_model/model_output_part_*.rds", n = length(mo_files), md5 = md5(tf)),
+  rbindlist(lapply(setdiff(names(in_files), "MO"), function(k) data.table(file = sub(paste0(root, "/"), "", in_files[[k]], fixed = TRUE), n = 1L, md5 = md5(in_files[[k]])))))
+provenance <- list(
+  inventory = inventory, input_legend = input_legend, inputs_md5 = inputs_md5, model_log = mo_log,
+  settings = list(yr_impl_start = yr_impl_start, yr_cum_start = yr_cum_start, yr_end = yr_end, n_impl_years = n_impl_years,
+                  locs_exclude = locs_exclude, model_parameters = mp),
+  parameter_check = param_chk,
+  session = list(R = R.version.string, packages = vapply(req_pkgs, function(p) as.character(packageVersion(p)), "")))
+save_rds(provenance, "provenance.rds")
+```
+
+# 23. Tracking workbook
+
+Rebuilt from the same objects with `openxlsx`. Layout per table sheet: title in row 1, headers in row 3,
+data from row 4, a blank row, `Notes:`, then a `Cell status:` legend. Titles and notes are the legacy ones.
+
+```{r workbook}
+wb_meta <- data.table(
+  sheet = c("T1_Scenarios", "T2_DeathsDelayed", "TS1_Regions", "TS2_CompareIntervention", "TS3_CompareCountry", "TS4_ModelCompare",
+            "TS5_Premature_Sex", "TS6_Premature_Top30", "TS7_ByCountry", "TS8_Sensitivity", "TS9_Assumptions"),
+  item = c("Table 1", "Table 2", paste0("Table S", 1:9)),
+  location = c("Main text", "Main text", rep("Supplement", 9)),
+  title = c("Intervention scenarios", "Deaths That Could Be Delayed by Different Interventions and Causes (Million)",
+            "List of countries in each region.",
+            "Estimated Deaths Delayed (Millions) From Scalable Cardiovascular Prevention Interventions: Comparison With Prior Global Modeling Studies by intervention",
+            "Estimated Deaths Delayed (Millions) From Scalable Cardiovascular Prevention Interventions: Comparison With Prior Global Modeling Studies by selected countries",
+            "Comparison of Modeling Approaches: This study vs Kontis et. al 2019",
+            "Premature deaths (<70 years) by intervention and sex, 2025–2050",
+            "Premature deaths delayed (<70 years) in the 30 most populous countries under combined interventions, 2025–2050",
+            "Projected CVD deaths, number of deaths delayed, and percent deaths delayed between 2026 and 2050 if all the interventions were implemented, by country.",
+            "Background and CVD mortality trends sensitivity scenarios on million deaths that could be delayed by intervention, 2026-2050",
+            "Structural Assumptions in the State-Transition Models"),
+  notes = c(
+    "Modeled interventions are summarized with their target levels, affected outcomes, and scale-up trajectories. Baseline (2025) and target values are population-weighted using 2019 population estimates from UN-WPP 2024.",
+    "Results are shown for all CVDs combined and for major causes, including hypertensive heart disease, hemorrhagic stroke, ischemic heart disease, and ischemic stroke. Column 3 presents projected deaths under each intervention modeled separately; these values reflect the full effect of each intervention on its own and should not be interpreted as contributions to the combined package. Rows labeled “All Interventions” represent the multiplicative joint impact of implementing all four interventions simultaneously across all causes. The final column expresses the proportional reduction as deaths delayed divided by projected deaths under business as usual.",
+    "Countries were grouped into seven geographic regions following the World Bank’s income and geographic grouping system.",
+    "Estimated deaths delayed between 2026 and 2050 from this study are compared with previous modeling analyses by Kontis et al. (2015–2040) and Pickersgill et al. (2022–2050) across selected interventions. Differences reflect variances in interventions, trends in risk factors, and modeling assumptions. The red column shows the results of this study if we used the same blood pressure, sodium reduction, and TFA methods and scenarios. Blank cells = intervention not modeled (—).",
+    "Estimated deaths delayed between 2026 and 2050 from this study are compared with previous modeling analyses by Kontis et al. (2015–2040) and Pickersgill et. al. (2022–2050) across selected countries that accumulate approximately 70% of deaths delayed. Differences reflect variances in interventions, trends in risk factors, and modeling assumptions. The red column shows the results of this study if we used the same blood pressure, sodium reduction, and TFA methods and scenarios.",
+    "Comparison of Modeling Approaches.",
+    "Deaths delayed are calculated as the difference in cumulative deaths between the business-as-usual scenario and each intervention scenario. Deaths delayed (<70 years %) indicate the proportion of all deaths delayed under the corresponding intervention and sex that occur before age 70 years, not the share of baseline deaths.",
+    "% deaths delayed <70 represents the proportion of all deaths delayed in each country that occur before age 70 years, serving as an indicator of the share of benefits attributable to premature mortality reduction.",
+    "Region column added in this workbook for tracking (from Table S1); it is not displayed in the manuscript table.",
+    "Projected deaths delayed (2026–2050) are shown under alternative assumptions for secular background and cardiovascular mortality trends, with results reported for individual interventions and their combined effects.",
+    "We used discrete-time Markov models stratified by single-year age (20–95+), sex, and calendar year (2019–2050). Interventions were assumed to be independent except for sodium reduction, which was linked to blood pressure and its downstream effects. Combined effects were applied multiplicatively to avoid double-counting and provide conservative estimates of joint impact."))
+fig_meta <- data.table(
+  figure = c("Figure 1", "Figure 1", "Figure 2", "Figure 3", "Figure 3", "Figure 4", rep("Figure S1", 4), "Figure S2", "Figure S2",
+             "Figure S3", "Figure S4", "Figure S4", "Figure S5"),
+  panel = c("A (annual)", "B (cumulative)", "-", "A (female)", "B (male)", "-", "A (hypertension control)", "B (sodium)", "C (TFA)",
+            "D (statins)", "A (required AROC)", "B (historical changes)", "-", "A (ASMR index)", "B (deaths)", "-"),
+  file = c("fig1a_annual_deaths_delayed.png", "fig1b_cumulative_deaths_delayed.png", "fig2_deaths_delayed_sex_age.png",
+           "fig3a_map_pct_delayed_female.png", "fig3b_map_pct_delayed_male.png", "fig4_deaths_delayed_sex_age_region.png",
+           "figS1a_traj_hypertension_control.png", "figS1b_traj_sodium.png", "figS1c_traj_tfa.png", "figS1d_traj_statins.png",
+           "figS2a_required_htn_scaleup.png", "figS2b_historical_cascade_changes.png", "figS3_asmr_by_cause.png",
+           "figS4a_asmr_index_vs_foresight.png", "figS4b_deaths_vs_foresight.png", "figS5_deaths_vs_unwpp.png"),
+  title = c(rep("Deaths that could be delayed by time and intervention, 2026-2050", 2),
+            "Deaths that could be delayed by sex, age, and intervention, 2026-2050",
+            rep("Proportion of Deaths Delayed by Country and Sex Compared to the Business-as-Usual Scenario (2026–2050)", 2),
+            "Deaths that could be delayed by sex, age, region and intervention, 2026-2050",
+            rep("Risk Factor Trajectories for Each Country Under Intervention Scenario, 2026-2050", 4),
+            rep("Required scale-up in hypertension control and historical year-to-year changes in the hypertension care cascade", 2),
+            "Age-Standardized Mortality Rates by Cause Intervention Scenario, 2000-2050",
+            rep("Comparison of Mortality Estimates and Forecasts vs GBD 2019 Foresight, 2000-2050", 2),
+            "Comparison of Global Death Estimates and Projections by Sex: Current Study vs UN-WPP 2024, 2000–2050"),
+  location = c(rep("Main text", 6), rep("Supplement", 10)),
+  notes = c(rep("Stacked area plots show the impact of each of the four interventions compared with business-as-usual. The top panel presents annual deaths delayed, while the bottom panel shows cumulative deaths delayed over time. Results are for the adult population aged 20+.", 2),
+            "Deaths from the adult population aged 20+.",
+            rep("Maps show the percentage reduction in cardiovascular deaths under the combined intervention scenario relative to the business-as-usual comparator. Results are presented separately for females (top) and males (bottom).", 2),
+            "Cardiovascular deaths that could be delayed under each intervention scenario from the adult population aged 20+.",
+            rep("Spaghetti plots show country-specific baseline levels and projected implementation dynamics for the four intervention scenarios.", 4),
+            rep("Required average annual increase in control to reach 50% by 2030/2040/2050 vs historical year-to-year changes (NCD-RisC 2000-2019).", 2),
+            "Age-standardized mortality rates per 100,000, 2000-2050, WHO World Standard Population rescaled to ages 20-95+.",
+            rep("ASMR indices (top) and absolute deaths (bottom) vs GBD 2019 Foresight, ages 20-95+, both sexes.", 2),
+            "Total global deaths by sex, this study vs UN-WPP 2024."))
+fig_meta[, status := inventory[match(file, id), status]]
+check(!anyNA(fig_meta$status), "figure missing from the inventory")
+check(all(fig_meta[status == "reproduced", file] %in% names(FIG_DONE)), "a reproduced figure was not saved")
+check(all(file.exists(file.path(dir_fig, fig_meta$file))), "a manuscript figure file is missing")
+build_date <- format(Sys.Date())
+
+wb <- openxlsx::createWorkbook()
+st_title <- openxlsx::createStyle(textDecoration = "bold", fontSize = 12)
+st_head  <- openxlsx::createStyle(textDecoration = "bold", fgFill = "#D9D9D9", wrapText = TRUE, valign = "top")
+st_wrap  <- openxlsx::createStyle(wrapText = TRUE, valign = "top")
+st_fill  <- list(reproduced = openxlsx::createStyle(fgFill = "#E2EFDA"), preserved_pending = openxlsx::createStyle(fgFill = "#FFF2CC"),
+                 fixed_external = openxlsx::createStyle(fgFill = "#DDEBF7"))
+status_legend <- paste("Generated by reports/manuscript-100mlives2-artifacts.Rmd. Shading: green = regenerated from repo inputs/outputs;",
+                       "yellow = preserved legacy value, not recalculated (REPRO_PENDING); blue = fixed value quoted from published literature;",
+                       "no shading = static author-written content. Do not edit by hand: re-knit the artifact Rmd.")
+col_widths <- function(df) pmin(70, pmax(10, vapply(names(df), function(n) max(nchar(n), quantile(nchar(as.character(df[[n]])), 0.9, na.rm = TRUE)), numeric(1)) + 2))
+add_sheet <- function(sheet, title, df, notes = NULL, status = NULL, numfmt = character(0), header_row = 3) {
+  openxlsx::addWorksheet(wb, sheet)
+  openxlsx::writeData(wb, sheet, title, startRow = 1, startCol = 1)
+  openxlsx::addStyle(wb, sheet, st_title, rows = 1, cols = 1)
+  openxlsx::writeData(wb, sheet, as.data.frame(df, check.names = FALSE), startRow = header_row, startCol = 1, headerStyle = st_head)
+  n <- nrow(df); k <- ncol(df); rows <- header_row + seq_len(n)
+  if (n) openxlsx::addStyle(wb, sheet, st_wrap, rows = rows, cols = seq_len(k), gridExpand = TRUE)
+  for (j in names(numfmt)) openxlsx::addStyle(wb, sheet, openxlsx::createStyle(numFmt = numfmt[[j]]), rows = rows, cols = match(j, names(df)), stack = TRUE)
+  if (!is.null(status)) for (s in names(st_fill)) {
+    idx <- which(status == s, arr.ind = TRUE)
+    if (nrow(idx)) openxlsx::addStyle(wb, sheet, st_fill[[s]], rows = header_row + idx[, 1], cols = idx[, 2], gridExpand = FALSE, stack = TRUE)
+  }
+  if (!is.null(notes)) {
+    openxlsx::writeData(wb, sheet, data.frame(a = "Notes:", b = notes), startRow = header_row + n + 2, colNames = FALSE)
+    openxlsx::writeData(wb, sheet, data.frame(a = "Cell status:", b = status_legend), startRow = header_row + n + 3, colNames = FALSE)
+  }
+  openxlsx::setColWidths(wb, sheet, cols = seq_len(k), widths = col_widths(df))
+  sprintf("A%d:%s%d", header_row, openxlsx::int2col(k), header_row + n)
+}
+idx_rows <- list()
+openxlsx::addWorksheet(wb, "Index")
+openxlsx::writeData(wb, "Index", "RTSL 100M Lives manuscript – tables and figures tracker", startRow = 1)
+openxlsx::addStyle(wb, "Index", st_title, rows = 1, cols = 1)
+for (i in seq_len(nrow(wb_meta))) {
+  m <- wb_meta[i]; t <- TB[[m$sheet]]
+  rng <- add_sheet(m$sheet, sprintf("%s. %s", m$item, m$title), t$csv, m$notes, t$status, t$numfmt)
+  st <- unique(as.vector(t$status))
+  idx_rows[[i]] <- data.table(Sheet = m$sheet, Item = m$item, Title = m$title, Location = m$location, `Data range` = rng,
+                              Notes = m$notes, Status = if (length(st) == 1) st else paste(sort(st), collapse = " + "))
+}
+math_idx <- data.table(Sheet = "(CSV only)", Item = "Math supplement (unnumbered)", Title = vapply(math_md, `[[`, "", "caption"),
+                       Location = "Supplement", `Data range` = paste0("tables/", names(math_md), ".csv"),
+                       Notes = "Inline pipe table in the manuscript (LaTeX); copied verbatim and checked against the model code.", Status = "static_content")
+fig_idx <- fig_meta[, .(Sheet = "Figures", Title = title[1], Location = location[1], `Data range` = paste0(.N, " panel(s)"),
+                        Notes = notes[1], Status = paste(unique(status), collapse = " + ")), by = .(Item = figure)]
+setcolorder(fig_idx, c("Sheet", "Item"))
+index <- rbind(rbindlist(idx_rows), math_idx, fig_idx)
+openxlsx::writeData(wb, "Index", paste0("Generated by reports/manuscript-100mlives2-artifacts.Rmd on ", build_date,
+                    ". For tracking and review only: the manuscript reads manuscript/artifacts/*.rds, not this workbook. Do not edit by hand."), startRow = 2)
+openxlsx::writeData(wb, "Index", index, startRow = 4, headerStyle = st_head)
+openxlsx::addStyle(wb, "Index", st_wrap, rows = 4 + seq_len(nrow(index)), cols = seq_len(ncol(index)), gridExpand = TRUE)
+openxlsx::setColWidths(wb, "Index", cols = seq_len(ncol(index)), widths = c(24, 12, 60, 12, 18, 70, 24))
+
+figs_sheet <- fig_meta[, .(Figure = figure, Panel = panel, Title = title, `File (figures/...)` = paste0("figures/", file), Location = location,
+                           `Notes (short)` = notes, `Last updated` = ifelse(status == "reproduced", build_date, "2026-02-04 (from WG manuscript)"),
+                           `Status / comments` = ifelse(status == "reproduced", "reproduced: regenerated by the artifact Rmd",
+                                                        paste("preserved_pending: legacy PNG kept;", inventory[match(file, id), pending])),
+                           Preview = "")]
+add_sheet("Figures", "Figures (image files live in the figures/ folder next to the Rmd)", figs_sheet,
+          status = matrix(ifelse(figs_sheet$`Status / comments` %like% "^reproduced", "reproduced", "preserved_pending"), nrow(figs_sheet), ncol(figs_sheet)))
+sc_sheet <- scalars[, .(Key = key, Display = display, `Manuscript location` = location, Unit = unit, Status = status, Value = value,
+                        Window = window, Source = source, Note = note, Pending = pending, `Legacy display` = legacy)]
+add_sheet("Scalars", "Numbers used in the manuscript text", sc_sheet,
+          status = matrix(rep(sc_sheet$Status, ncol(sc_sheet)), nrow(sc_sheet), ncol(sc_sheet)), numfmt = c(Value = "0.000"))
+prov_sheet <- inventory[, .(`Artifact ID` = id, Type = type, `Manuscript location` = location, Inputs = inputs, Filters = filters,
+                            Method = method, `Report chunk` = chunk, `Output path` = output, Status = status, `Pending dependency` = pending)]
+add_sheet("Provenance", "Provenance of every manuscript number, table and figure (input codes: see the artifact Rmd, section 1)", prov_sheet)
+openxlsx::worksheetOrder(wb) <- match(c("Index", wb_meta$sheet, "Figures", "Scalars", "Provenance"), names(wb))
+openxlsx::saveWorkbook(wb, xlsx_out, overwrite = TRUE)
+```
+
+# 24. Integrity checks
+
+```{r integrity}
+t2c <- TB$T2_DeathsDelayed$csv
+chk <- list(
+  "BAU/intervention keys match (no DD stratum without BAU)" = nrow(D[!B, on = .(location, cause, sex, age_group, year)]) == 0,
+  "no duplicated strata after dropping non-finite rows" = all(mo_log$duplicated_strata == 0),
+  "pop and all.mx identical across the four cause models" = max(mo_log$cause_copy_deviation) < 1e-8,
+  "deaths delayed in 2025 are zero" = D[year == 2025, sum(abs(dd))] < 1e-6,
+  "per-year divisor = years 2026-2050 inclusive" = n_impl_years == length(2026:2050),
+  "cause rows sum to all-CVD (BAU)" = abs(s_cause[int == "All", sum(bau)] - g(s_int, "bau", int = "All")) < 1e-3,
+  "cause rows sum to all-CVD (DD, each intervention)" = all(abs(s_cause[, .(d = sum(dd)), by = int][s_int, on = "int", d - i.dd]) < 1e-3),
+  "sex, age and region partitions sum to totals" = all(abs(c(s_sex[int == "All", sum(dd)], s_age[int == "All", sum(dd)], s_reg[int == "All", sum(dd)]) - dd_all) < 1e-3),
+  "percentages are proportions in tables (0-1)" = all(between(c(t2c$`Deaths Delayed (%)`, TB$TS5_Premature_Sex$csv[[4]], TB$TS6_Premature_Top30$csv[[3]], TB$TS7_ByCountry$csv$`% Delayed`), -1, 1)),
+  "no missing or non-finite reproduced values" = all(is.finite(unlist(lapply(TB[c("T2_DeathsDelayed", "TS5_Premature_Sex", "TS6_Premature_Top30", "TS7_ByCountry")], function(t) unlist(t$csv[, which(vapply(t$csv, is.numeric, TRUE)), with = FALSE]))))),
+  "scalar dd_all_total equals Table 2 All row" = abs(SC$dd_all_total_M$value - t2c[Cause == "All CVDs" & Intervention == "All Interventions", `Deaths Delayed (M)`]) < 1e-9,
+  "Table S2 this-study equals Table 2 all-CVD rows" = all(abs(TB$TS2_CompareIntervention$csv[[2]] - t2c[Cause == "All CVDs"][match(TB$TS2_CompareIntervention$csv$Intervention, Intervention), `Deaths Delayed (M)`]) < 1e-9),
+  "Table S3 this-study equals Table S7" = all(abs(TB$TS3_CompareCountry$csv[[2]] * 1e6 - TB$TS7_ByCountry$csv[match(TB$TS3_CompareCountry$csv$Country, Location), `Deaths Delayed`]) < 1e-3),
+  "Table S7 sums to the global total" = abs(sum(TB$TS7_ByCountry$csv$`Deaths Delayed`) - dd_all) < 1e-3,
+  "Table S5 All rows sum to dd_all_u70" = abs(sum(TB$TS5_Premature_Sex$csv[Intervention == "All Interventions", `Deaths Delayed (#)`]) - SC$dd_all_u70_M$value * 1e6) < 1e-3,
+  "Table S6 shares match Table S7 totals" = all(abs(TB$TS6_Premature_Top30$csv[[2]] / TB$TS6_Premature_Top30$csv[[3]] - TB$TS7_ByCountry$csv[match(TB$TS6_Premature_Top30$csv$Location, Location), `Deaths Delayed`]) < 1e-3),
+  "Figure 1 data sum to single-intervention totals" = all(abs(f1[, .(d = sum(dd)), by = int][s_int, on = "int", nomatch = 0L, d - i.dd]) < 1e-3),
+  "Figure 2 data sum to intervention totals" = all(abs(f2[, .(d = sum(dd)), by = int][s_int, on = "int", d - i.dd]) < 1e-3),
+  "Figure 4 panels each sum to single-intervention totals" = all(abs(f4[, .(d = sum(dd)), by = .(int, disaggregation)][s_int, on = "int", nomatch = 0L, d - i.dd]) < 1e-3),
+  "Table S1 lists every modelled country once" = setequal(unlist(strsplit(TB$TS1_Regions$csv$Countries, ", ", fixed = TRUE)), locs),
+  "Table S6 country set = 30 largest adult populations in 2025" = length(unique(TB$TS6_Premature_Top30$csv$Location)) == 30,
+  "math tables verbatim in the manuscript" = all(math_in_ms),
+  "every figure referenced by the manuscript exists" = all(file.exists(file.path(dir_fig, fig_meta$file))),
+  "every manuscript table has a CSV" = all(file.exists(file.path(dir_tab, paste0(c(wb_meta$sheet, names(math_md)), ".csv")))))
+integrity <- data.table(check = names(chk), passed = unlist(chk))
+knitr::kable(integrity, caption = "Integrity checks")
+check(all(integrity$passed), paste("integrity checks failed:", paste(integrity[!(passed), check], collapse = "; ")))
+knitr::kable(fig3_range[, .(sex, min = round(min, 1), max = round(max, 1))],
+             caption = "Figure 3: range of % reductions by sex (the lowest legend bin is labelled 5-9% but holds everything up to 9%)")
+knitr::kable(f3[pct < 5, .(location, sex, pct = round(pct, 1))], caption = "Figure 3: countries below 5% (shown in the 5-9% bin)")
+```
+
+# 25. Comparison with the legacy manuscript and workbook
+
+Printed in the knitted output only (not saved). Values are compared at their displayed precision; the
+legacy values are constants (from the manuscript text, or the legacy workbook for tables), never read
+from the regenerated workbook.
+
+```{r discrepancies}
+explain <- c(
+  dd_stroke_all_M = "legacy 66.7 = 21.7 + 45.0 (sum of rounded values); at full precision 21.73 + 45.04 = 66.77",
+  dd_tfa_per_year_k = "legacy 190,000 = 4.47M / 24; Table 2 (0.18M) and every other per-year value use / 25",
+  val_bau_2050_M = "legacy 34 matches the older run shown in the legacy Figure S4b; current outputs give 34.98M in 2050",
+  sodium_china_current_g = "7.0469 g/day rounds to 7.05; legacy truncated it",
+  sodium_china_gbd23_vs_gbd10_pct = "7.0469 / 4.83 = 1.459, i.e. 46% higher; legacy text says about 40%",
+  `TS5_Premature_Sex: Deaths Delayed (<70 years %)` = "legacy values equal DD<70 / ~105.9M for every row (not the note's estimand); regenerated as DD<70 / all DD for that intervention and sex, as the note defines",
+  `TS5_Premature_Sex: Deaths Delayed (#)` = "Antigua and Barbuda BP-only rows with non-finite states are given no effect here; legacy treated their deaths as 0 (differences of tens of deaths)",
+  `T2_DeathsDelayed: Deaths Delayed per Year` = "legacy cause rows divide by 24 (report deaths_summary() hard-codes /24); the all-CVD rows and the text divide by 25",
+  `TS7_ByCountry: % Delayed (legacy stored at 2 decimals)` = "BAU now summed over 2026-2050 (legacy 2025-2050); the legacy % was also rounded to 2 decimals before display",
+  `T1_Scenarios: Baseline level (2025)` = "2025 baseline (the note's estimand) is 4.150 g/day, just below the rounding boundary; the report's 2019 value (4.151) gave 4.2")
+sc_cmp <- scalars[status == "reproduced", .(item = key, legacy, reproduced = display)][legacy != reproduced]
+leg_t2 <- data.table(
+  int = c("All", "HTN", "Sodium", "TFA", "Statins", "All", "HTN", "Sodium", "All", "HTN", "Sodium", "All", "HTN", "Sodium", "TFA", "Statins", "All", "HTN", "Sodium", "Statins"),
+  proj = c(578.1, 621.8, 659.9, 691.7, 685.3, 57.8, 60.1, 64.2, 92.1, 106.9, 116.4, 300, 320.8, 335.3, 337.5, 331.7, 128.2, 134, 144, 149.3),
+  bau = c(rep(696.2, 5), rep(66.8, 3), rep(137.1, 3), rep(342.3, 5), rep(149.9, 4)),
+  dd = c(118.1, 74.4, 36.3, 4.5, 10.9, 9, 6.8, 2.6, 45, 30.2, 20.7, 42.3, 21.5, 7, 4.9, 10.6, 21.7, 16, 6, 0.7),
+  per_year = c(4.72, 2.98, 1.45, 0.18, 0.44, 0.38, 0.28, 0.11, 1.88, 1.26, 0.86, 1.76, 0.9, 0.29, 0.2, 0.44, 0.91, 0.67, 0.25, 0.03),
+  pct = c(0.17, 0.107, 0.052, 0.006, 0.016, 0.135, 0.101, 0.04, 0.329, 0.22, 0.151, 0.124, 0.063, 0.02, 0.014, 0.031, 0.145, 0.107, 0.04, 0.005))
+leg_t2_disp <- leg_t2[, .(fmt_num(proj, 1), fmt_num(bau, 1), fmt_num(dd, 1), fmt_num(per_year, 2), fmt_pct(pct, 1))]
+leg_ts5 <- data.table(dd = c(14181491, 9470186, 4512929, 596929, 1058252, 20657165, 13293471, 6363284, 1153900, 1907996),
+                      pct = c(0.134, 0.089, 0.043, 0.006, 0.01, 0.195, 0.126, 0.06, 0.011, 0.018))
+leg_ts6 <- fread(text = "India|8026970|0.413
+China|5969168|0.149
+Indonesia|3345458|0.483
+Pakistan|1397068|0.51
+Russian Federation|877841|0.23
+Nigeria|782933|0.46
+Bangladesh|766850|0.39
+Myanmar|765157|0.483
+Philippines|679164|0.431
+Egypt|642144|0.422
+Viet Nam|623104|0.312
+Ethiopia|482288|0.484
+Democratic Republic of the Congo|449302|0.498
+Brazil|414840|0.286
+Tanzania|370261|0.576
+Ukraine|337732|0.261
+South Africa|217640|0.399
+Iran (Islamic Republic of)|208827|0.216
+Mexico|166329|0.218
+United States|158265|0.149
+Thailand|130542|0.234
+Turkey|108479|0.198
+Colombia|84986|0.181
+Japan|81693|0.079
+United Kingdom|40479|0.115
+Italy|34311|0.048
+Germany|29698|0.089
+France|25864|0.061
+Spain|22501|0.077
+Republic of Korea|14755|0.075", sep = "|", header = FALSE, col.names = c("Location", "dd", "share"))
+leg_ts2_this <- c(74.4, 36.3, 4.5, 10.9, 118.1)
+leg_ts3_this <- c(39.9, 19.5, 6.9, 3.8, 1.1, 2.7, 1.5, 2, 1.5, 1, 1.6, 1.3, 1.7, 0.8, 1.6)
+leg_t1_base <- c("Mean intake 4.2 g/day", "0.4% of energy intake", "7 % coverage of statins as primary prevention")
+leg_ts1 <- c(   # legacy workbook TS1_Regions!B4:B10, regions in alphabetical order
+  "Albania, Armenia, Azerbaijan, Belarus, Bosnia and Herzegovina, Bulgaria, Croatia, Czechia, Estonia, Georgia, Hungary, Kazakhstan, Kyrgyzstan, Latvia, Lithuania, Mongolia, Montenegro, North Macedonia, Poland, Republic of Moldova, Romania, Russian Federation, Serbia, Slovakia, Slovenia, Tajikistan, Turkmenistan, Ukraine, Uzbekistan",
+  "Andorra, Argentina, Australia, Austria, Belgium, Brunei Darussalam, Canada, Chile, Cyprus, Denmark, Finland, France, Germany, Greece, Iceland, Ireland, Israel, Italy, Japan, Luxembourg, Malta, Netherlands, New Zealand, Norway, Portugal, Republic of Korea, Singapore, Spain, Sweden, Switzerland, United Kingdom, United States, Uruguay",
+  "Antigua and Barbuda, Bahamas, Barbados, Belize, Bolivia, Brazil, Colombia, Costa Rica, Cuba, Dominica, Dominican Republic, Ecuador, El Salvador, Grenada, Guatemala, Guyana, Haiti, Honduras, Jamaica, Mexico, Nicaragua, Panama, Paraguay, Peru, Puerto Rico, Saint Lucia, Saint Vincent and the Grenadines, Suriname, Trinidad and Tobago, Venezuela (Bolivarian Republic of)",
+  "Algeria, Bahrain, Egypt, Iran (Islamic Republic of), Iraq, Jordan, Kuwait, Lebanon, Libya, Morocco, Oman, Palestine, Qatar, Saudi Arabia, Sudan, Syrian Arab Republic, Tunisia, Turkey, United Arab Emirates, Yemen",
+  "Afghanistan, Bangladesh, Bhutan, India, Nepal, Pakistan",
+  "American Samoa, Cambodia, China, Democratic People's Republic of Korea, Fiji, Indonesia, Kiribati, Lao People's Democratic Republic, Malaysia, Maldives, Marshall Islands, Micronesia (Federated States of), Myanmar, Papua New Guinea, Philippines, Samoa, Solomon Islands, Sri Lanka, Taiwan (Province of China), Thailand, Timor-Leste, Tonga, Vanuatu, Viet Nam",
+  "Angola, Benin, Botswana, Burkina Faso, Burundi, Cabo Verde, Cameroon, Central African Republic, Chad, Comoros, Congo, Democratic Republic of the Congo, Djibouti, Equatorial Guinea, Eritrea, Eswatini, Ethiopia, Gabon, Gambia, Ghana, Guinea, Guinea-Bissau, Ivory Coast, Kenya, Lesotho, Liberia, Madagascar, Malawi, Mali, Mauritania, Mauritius, Mozambique, Namibia, Niger, Nigeria, Rwanda, Sao Tome and Principe, Senegal, Seychelles, Sierra Leone, Somalia, South Africa, South Sudan, Tanzania, Togo, Uganda, Zambia, Zimbabwe")
+leg_ts7 <- fread(text = "Albania|335142|446220|111078|4443|0.25
+Armenia|401778|480486|78708|3148|0.16
+Azerbaijan|1481971|1802372|320400|12816|0.18
+Belarus|1893060|2157747|264687|10587|0.12
+Bosnia and Herzegovina|519466|618101|98635|3945|0.16
+Bulgaria|1512323|1723985|211662|8466|0.12
+Croatia|559567|658488|98922|3957|0.15
+Czechia|1515539|1649411|133872|5355|0.08
+Estonia|189644|214120|24476|979|0.11
+Georgia|595564|709210|113646|4546|0.16
+Hungary|1454422|1669677|215254|8610|0.13
+Kazakhstan|1955074|2238031|282957|11318|0.13
+Kyrgyzstan|795498|935131|139633|5585|0.15
+Latvia|338202|385195|46993|1880|0.12
+Lithuania|493072|562254|69182|2767|0.12
+Mongolia|238348|298959|60611|2424|0.2
+Montenegro|87154|103335|16180|647|0.16
+North Macedonia|334207|386489|52282|2091|0.14
+Poland|4145224|4659366|514142|20566|0.11
+Republic of Moldova|554558|655143|100585|4023|0.15
+Romania|3616725|4068822|452098|18084|0.11
+Russian Federation|26912681|30728661|3815980|152639|0.12
+Serbia|1382833|1548426|165593|6624|0.11
+Slovakia|743967|824590|80623|3225|0.1
+Slovenia|173624|209426|35803|1432|0.17
+Tajikistan|858653|1062353|203700|8148|0.19
+Turkmenistan|849687|1023824|174137|6965|0.17
+Ukraine|10623711|11916899|1293187|51727|0.11
+Uzbekistan|4564267|5291141|726874|29075|0.14
+Andorra|3100|3455|355|14|0.1
+Argentina|1937691|2330576|392885|15715|0.17
+Australia|1157902|1359782|201879|8075|0.15
+Austria|763592|847142|83550|3342|0.1
+Belgium|640134|705975|65841|2634|0.09
+Brunei Darussalam|19621|22928|3306|132|0.14
+Canada|1942392|2021017|78625|3145|0.04
+Chile|934032|1065325|131293|5252|0.12
+Cyprus|94845|104313|9468|379|0.09
+Denmark|244877|294400|49523|1981|0.17
+Finland|570454|626544|56090|2244|0.09
+France|2938591|3361579|422987|16919|0.13
+Germany|6518006|6851178|333172|13327|0.05
+Greece|1120912|1247505|126594|5064|0.1
+Iceland|22069|23018|949|38|0.04
+Ireland|255745|292012|36267|1451|0.12
+Israel|242506|282429|39923|1597|0.14
+Italy|4946162|5663379|717217|28689|0.13
+Japan|6880249|7908276|1028027|41121|0.13
+Luxembourg|33618|38328|4710|188|0.12
+Malta|47501|50488|2988|120|0.06
+Netherlands|840770|988810|148040|5922|0.15
+New Zealand|261550|301797|40247|1610|0.13
+Norway|201686|232162|30477|1219|0.13
+Portugal|772645|837793|65148|2606|0.08
+Republic of Korea|2551811|2749085|197274|7891|0.07
+Singapore|245762|267123|21362|854|0.08
+Spain|2304227|2595829|291602|11664|0.11
+Sweden|713513|817746|104233|4169|0.13
+Switzerland|597796|662371|64575|2583|0.1
+United Kingdom|3342449|3695900|353451|14138|0.1
+United States|22015781|23080294|1064513|42581|0.05
+Uruguay|189306|215178|25872|1035|0.12
+Antigua and Barbuda|5865|7038|1173|47|0.17
+Bahamas|31046|35983|4936|197|0.14
+Barbados|20446|23473|3026|121|0.13
+Belize|15351|18384|3033|121|0.17
+Bolivia|491698|580770|89072|3563|0.15
+Brazil|9638610|11089033|1450423|58017|0.13
+Colombia|2935685|3404020|468335|18733|0.14
+Costa Rica|266652|289628|22976|919|0.08
+Cuba|1107412|1222684|115272|4611|0.09
+Dominica|5126|6287|1162|46|0.19
+Dominican Republic|760086|908038|147952|5918|0.16
+Ecuador|772029|902579|130549|5222|0.15
+El Salvador|332721|374952|42231|1689|0.11
+Grenada|7238|8757|1519|61|0.17
+Guatemala|686977|824136|137160|5486|0.17
+Guyana|56669|67929|11261|450|0.17
+Haiti|963926|1213321|249395|9976|0.21
+Honduras|523676|600974|77298|3092|0.13
+Jamaica|158944|194845|35901|1436|0.18
+Mexico|6050865|6812508|761642|30466|0.11
+Nicaragua|361079|411575|50496|2020|0.12
+Panama|205520|244356|38835|1553|0.16
+Paraguay|333800|407802|74003|2960|0.18
+Peru|729321|843083|113762|4550|0.14
+Puerto Rico|180480|207233|26753|1070|0.13
+Saint Lucia|9017|11094|2077|83|0.19
+Saint Vincent and the Grenadines|8242|9782|1540|62|0.16
+Suriname|38315|46501|8186|327|0.18
+Trinidad and Tobago|138234|161019|22785|911|0.14
+Venezuela (Bolivarian Republic of)|2813666|3147539|333873|13355|0.11
+Algeria|4271913|5013095|741182|29647|0.15
+Bahrain|73486|84527|11042|442|0.13
+Egypt|11923271|13446368|1523098|60924|0.11
+Iran (Islamic Republic of)|7588577|8555379|966802|38672|0.11
+Iraq|2757999|3381775|623776|24951|0.18
+Jordan|601380|668258|66878|2675|0.1
+Kuwait|305929|335974|30045|1202|0.09
+Lebanon|337544|379082|41538|1662|0.11
+Libya|611531|745520|133988|5360|0.18
+Morocco|4883661|5662742|779081|31163|0.14
+Oman|307366|363070|55704|2228|0.15
+Palestine|278549|324464|45915|1837|0.14
+Qatar|91150|105978|14828|593|0.14
+Saudi Arabia|2552684|2900575|347890|13916|0.12
+Sudan|3800392|4596972|796580|31863|0.17
+Syrian Arab Republic|1866509|2119048|252539|10102|0.12
+Tunisia|756455|899323|142868|5715|0.16
+Turkey|7708838|8256857|548019|21921|0.07
+United Arab Emirates|505060|579023|73963|2959|0.13
+Yemen|2299420|2745966|446547|17862|0.16
+Afghanistan|2930039|3492584|562545|22502|0.16
+Bangladesh|14710905|16679676|1968772|78751|0.12
+Bhutan|34036|44523|10486|419|0.24
+India|92691051|112147357|19456306|778252|0.17
+Nepal|1118829|1454243|335414|13417|0.23
+Pakistan|9870611|12608991|2738380|109535|0.22
+American Samoa|3512|4391|878|35|0.2
+Cambodia|1078825|1283792|204967|8199|0.16
+China|149262711|189191511|39928800|1597152|0.21
+Democratic People's Republic of Korea|3445295|4187062|741767|29671|0.18
+Fiji|71916|90365|18449|738|0.2
+Indonesia|20695420|27623113|6927693|277108|0.25
+Kiribati|4668|6033|1365|55|0.23
+Lao People's Democratic Republic|521352|644609|123258|4930|0.19
+Malaysia|1972509|2472951|500443|20018|0.2
+Maldives|28425|36543|8118|325|0.22
+Marshall Islands|4354|5405|1051|42|0.19
+Micronesia (Federated States of)|7725|9764|2039|82|0.21
+Myanmar|6132331|7716497|1584166|63367|0.21
+Papua New Guinea|690793|846907|156113|6245|0.18
+Philippines|8045963|9620004|1574041|62962|0.16
+Samoa|11682|14693|3011|120|0.21
+Solomon Islands|59207|75171|15964|639|0.21
+Sri Lanka|1943362|2351941|408579|16343|0.17
+Taiwan (Province of China)|1266718|1395289|128570|5143|0.09
+Thailand|2905975|3464547|558572|22343|0.16
+Timor-Leste|79278|99514|20236|809|0.2
+Tonga|8276|10423|2148|86|0.21
+Vanuatu|18866|25933|7068|283|0.27
+Viet Nam|6710932|8709764|1998832|79953|0.23
+Angola|1013026|1331639|318613|12745|0.24
+Benin|353684|465169|111485|4459|0.24
+Botswana|52184|66825|14641|586|0.22
+Burkina Faso|319918|417598|97680|3907|0.23
+Burundi|322284|431450|109166|4367|0.25
+Cabo Verde|20819|25997|5177|207|0.2
+Cameroon|821150|1109553|288403|11536|0.26
+Central African Republic|131661|183381|51720|2069|0.28
+Chad|529992|715023|185030|7401|0.26
+Comoros|13569|17622|4053|162|0.23
+Congo|207425|273365|65939|2638|0.24
+Democratic Republic of the Congo|3032588|3934231|901643|36066|0.23
+Djibouti|34578|44406|9827|393|0.22
+Equatorial Guinea|62953|80599|17645|706|0.22
+Eritrea|106411|132153|25743|1030|0.2
+Eswatini|31173|41402|10229|409|0.25
+Ethiopia|2979047|3975616|996570|39863|0.25
+Gabon|74329|94398|20069|803|0.21
+Gambia|57366|76540|19175|767|0.25
+Ghana|1528353|1916579|388226|15529|0.2
+Guinea|450008|621654|171646|6866|0.28
+Guinea-Bissau|81522|108223|26702|1068|0.25
+Ivory Coast|824775|1107587|282811|11312|0.26
+Kenya|877617|1165943|288326|11533|0.25
+Lesotho|68962|89218|20256|810|0.23
+Liberia|196811|264315|67504|2700|0.26
+Madagascar|1045305|1401994|356688|14268|0.25
+Malawi|449583|613897|164314|6573|0.27
+Mali|537835|706778|168944|6758|0.24
+Mauritania|144536|188045|43508|1740|0.23
+Mauritius|110252|127543|17291|692|0.14
+Mozambique|661967|906622|244655|9786|0.27
+Namibia|80894|101241|20348|814|0.2
+Niger|575843|802181|226338|9054|0.28
+Nigeria|7693847|9394642|1700795|68032|0.18
+Rwanda|420615|552477|131862|5274|0.24
+Sao Tome and Principe|6159|8267|2108|84|0.26
+Senegal|513783|690680|176897|7076|0.26
+Seychelles|8047|9653|1606|64|0.17
+Sierra Leone|255194|347149|91955|3678|0.27
+Somalia|216973|300073|83099|3324|0.28
+South Africa|2857435|3403401|545966|21839|0.16
+South Sudan|397564|522853|125289|5012|0.24
+Tanzania|1743013|2385741|642728|25709|0.27
+Togo|281361|364419|83058|3322|0.23
+Uganda|915638|1171252|255614|10225|0.22
+Zambia|627726|868559|240833|9633|0.28
+Zimbabwe|395819|523329|127510|5100|0.24", sep = "|", header = FALSE, col.names = c("Location", "proj", "bau", "dd", "per_year", "pct"))
+
+cmp_cells <- function(table, rowid, column, legacy, reproduced) {
+  data.table(item = paste0(table, ": ", column), row = rowid, legacy, reproduced = fcoalesce(reproduced, "(not in table)"))
+}
+by_loc <- function(tab, col, loc) TB[[tab]]$display[[col]][match(loc, TB[[tab]]$csv[[1]])]
+d2 <- TB$T2_DeathsDelayed$display
+tab_cmp <- rbindlist(list(
+  rbindlist(lapply(1:5, function(j) cmp_cells("T2_DeathsDelayed", paste(d2$Cause, d2$Intervention, sep = " / "), names(d2)[j + 2], leg_t2_disp[[j]], d2[[j + 2]]))),
+  cmp_cells("TS5_Premature_Sex", paste(TB$TS5_Premature_Sex$csv$Intervention, TB$TS5_Premature_Sex$csv$Sex), "Deaths Delayed (#)", fmt_int(leg_ts5$dd), TB$TS5_Premature_Sex$display[[3]]),
+  cmp_cells("TS5_Premature_Sex", paste(TB$TS5_Premature_Sex$csv$Intervention, TB$TS5_Premature_Sex$csv$Sex), "Deaths Delayed (<70 years %)", fmt_pct(leg_ts5$pct, 1), TB$TS5_Premature_Sex$display[[4]]),
+  cmp_cells("TS6_Premature_Top30", "row order and country set", "Location", paste(leg_ts6$Location, collapse = ";"), paste(TB$TS6_Premature_Top30$csv$Location, collapse = ";")),
+  cmp_cells("TS6_Premature_Top30", leg_ts6$Location, "Projected Deaths Delayed <70 years", fmt_int(leg_ts6$dd), by_loc("TS6_Premature_Top30", 2, leg_ts6$Location)),
+  cmp_cells("TS6_Premature_Top30", leg_ts6$Location, "Share of delayed deaths occurring <70 years (%)", fmt_pct(leg_ts6$share, 1), by_loc("TS6_Premature_Top30", 3, leg_ts6$Location)),
+  cmp_cells("TS7_ByCountry", "row order", "Location", paste(leg_ts7$Location, collapse = ";"), paste(TB$TS7_ByCountry$csv$Location, collapse = ";")),
+  rbindlist(lapply(c("proj", "bau", "dd", "per_year"), function(v)
+    cmp_cells("TS7_ByCountry", leg_ts7$Location, v, fmt_int(leg_ts7[[v]]),
+              by_loc("TS7_ByCountry", match(v, c("Location", "proj", "bau", "dd", "per_year")), leg_ts7$Location)))),
+  cmp_cells("TS7_ByCountry", leg_ts7$Location, "% Delayed (legacy stored at 2 decimals)", fmt_pct(leg_ts7$pct, 0), by_loc("TS7_ByCountry", 6, leg_ts7$Location)),
+  cmp_cells("TS2_CompareIntervention", TB$TS2_CompareIntervention$csv$Intervention, "This study", fmt_num(leg_ts2_this, 1), TB$TS2_CompareIntervention$display[[2]]),
+  cmp_cells("TS3_CompareCountry", TB$TS3_CompareCountry$csv$Country, "This study", fmt_num(leg_ts3_this, 1), TB$TS3_CompareCountry$display[[2]]),
+  cmp_cells("T1_Scenarios", TB$T1_Scenarios$csv$Intervention[2:4], "Baseline level (2025)", leg_t1_base, TB$T1_Scenarios$display$`Baseline level (2025)`[2:4]),
+  cmp_cells("TS1_Regions", TB$TS1_Regions$csv$Region, "Countries", leg_ts1, TB$TS1_Regions$csv$Countries)))
+tab_diff <- tab_cmp[legacy != reproduced]
+tab_diff_summary <- tab_diff[, .(cells_differing = .N, example_row = row[1], example_legacy = substr(legacy[1], 1, 60),
+                                 example_reproduced = substr(reproduced[1], 1, 60)), by = item]
+disc <- rbind(sc_cmp[, .(item, cells_differing = 1L, example_row = "", example_legacy = legacy, example_reproduced = reproduced)], tab_diff_summary)
+window_note <- sprintf("BAU now summed over %d-2050 (stated horizon); legacy used 2025-2050. Deaths delayed unchanged.", yr_cum_start)
+window_dep <- c(scalars[status == "reproduced" & grepl("^(pct_|one_in_n)|^bau_total|^proj_all", key), key],
+                "T2_DeathsDelayed: Projected Deaths, Intervention", "T2_DeathsDelayed: Projected Deaths, Business as Usual",
+                "T2_DeathsDelayed: Deaths Delayed (%)", "TS7_ByCountry: proj", "TS7_ByCountry: bau")
+disc[, explanation := fifelse(item %in% names(explain), explain[item], fifelse(item %in% window_dep, window_note, ""))]
+knitr::kable(disc, caption = sprintf("Reproduced values that differ from the legacy display (%d scalars, %d table cells compared)",
+                                     scalars[status == "reproduced", .N], nrow(tab_cmp)))
+if (nrow(tab_diff)) knitr::kable(tab_diff[order(item)][, head(.SD, 60)], caption = "Differing table cells (first 60)")
+knitr::kable(data.table(table_S3 = ts3_ext$location, top15_this_study = ts3_top15, in_table_S3 = ts3_top15 %in% ts3_ext$location),
+             caption = "Table S3 countries (Kontis top 15) vs the 15 largest deaths-delayed totals in this study")
+
+# Effect of the window change on the headline estimands: legacy 2025-2050 vs the 2026-2050 window used here
+alt <- summ(years = 2025L:yr_end)
+knitr::kable(merge(alt[, .(int, bau_2025 = round(bau / 1e6, 1), pct_2025 = round(100 * pct, 1))],
+                   s_int[, .(int, bau_used = round(bau / 1e6, 1), pct_used = round(100 * pct, 1), dd_M = round(dd / 1e6, 1))], by = "int"),
+             caption = sprintf("Cumulative totals: legacy 2025-2050 vs %d-2050 (used)", yr_cum_start))
+```

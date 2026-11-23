@@ -1,0 +1,6 @@
+Transition,Rate,status
+Well → Sick,"$IR_{\text{new}}(a,s,c,t) = IR(a,s,c,t) \times \varepsilon_{IR}$",static_content
+Sick → Dead (disease),"$CF_{\text{new}}(a,s,c,t) = CF(a,s,c,t) \times \varepsilon_{CF}$",static_content
+Well → Dead (background),"$BG.mx(a,s,c,t)$",static_content
+Sick → Dead (background),"$BG.mx(a,s,c,t)$",static_content
+All → Dead (COVID-19),"$covid.mx(a,s,t)$ (2020-2021 only)",static_content

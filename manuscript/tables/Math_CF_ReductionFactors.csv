@@ -1,0 +1,5 @@
+Cause,CF Reduction Factor ($\rho_{CF}$),status
+IHD,0.24,static_content
+Ischemic stroke,0.36,static_content
+Hemorrhagic stroke,0.76,static_content
+HHD,0.20,static_content

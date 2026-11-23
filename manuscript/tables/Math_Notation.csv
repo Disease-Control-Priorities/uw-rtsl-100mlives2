@@ -1,0 +1,64 @@
+Symbol,Description,status
+*Core Variables*,"",static_content
+"$a, s, c, t, \ell$","Age, sex, cause, time (year), location",static_content
+$\text{BP}_{\text{cat}}$,Blood pressure category,static_content
+"$IR_{\text{original}}, CF_{\text{original}}$",Baseline -Business as usual- incidence rate and case fatality rate (inputs to the transition model),static_content
+"$IR_{\text{new}}, CF_{\text{new}}$",Post-intervention incidence rate and case fatality rate,static_content
+"$W, K, D$","Well, sick, dead populations",static_content
+$N$,Total population,static_content
+*Antihypertensive Therapy (BP Control)*,"",static_content
+"$C_{\text{baseline}}, C_{\text{target}}$",Baseline and target hypertension control rates,static_content
+"$C_0, C_t$",Baseline coverage and coverage at time $t$,static_content
+$\Delta C_{\text{target}}$,Total required incremental change to reach target,static_content
+$\Delta C_{\text{increment}}$,Time-varying annual incremental coverage (scale-up path),static_content
+$\Delta C_{\text{delta}}$,Coverage delta at time $t$ ($C_t - C_0$),static_content
+$C_{\text{agg}}^{\Delta}$,Aggregate incremental coverage for modifying CF,static_content
+$P(\text{BP}_{\text{cat}})$,Distribution of population across BP categories,static_content
+$w_{\text{DM}}$,Diabetes prevalence weight applied to Ettehad effects,static_content
+$E_{\text{trial}}$,Ettehad effect size per 10 mmHg SBP reduction,static_content
+$RR_{\text{GBD}}$,GBD relative risk per 10 mmHg SBP increase,static_content
+$\alpha_{\text{inc}}$,Incidence normalization factor to anchor baseline IR,static_content
+$\rho_{CF}$,Case-fatality reduction factor per unit coverage gained,static_content
+"$\varepsilon_{IR,\text{BP}}, \varepsilon_{CF,\text{BP}}$",BP-control effect ratios applied to $IR_{\text{original}}$ and $CF_{\text{original}}$,static_content
+"$T_{\text{start}}, T_{\text{end}}$",Scale-up start and end years,static_content
+$\Delta SBP_{\text{treated}}$,Expected SBP reduction among newly controlled hypertensives,static_content
+$f_{\text{scale}}(t)$,Generic scale-up function mapping $t$ to $C_t$,static_content
+*Sodium Reduction*,"",static_content
+"$S_{\text{current}}, S_{\text{target}}$",Current and target sodium intake (g/day),static_content
+$S_{\text{eff}}$,Sodium reduction parameter,static_content
+$S_{\text{reduction}}$,Time-varying sodium reduction,static_content
+$\Delta SBP$,Blood pressure reduction from sodium,static_content
+$\phi_{\text{hyp}}$,Proportion with raised BP,static_content
+"$T_{\text{salt,start}}, T_{\text{salt,end}}$",Sodium intervention start and end years,static_content
+$E^{IR}_{\text{sodium}}$,"Sodium-mediated intermediate proportional reduction in incidence (BP-bin specific, if indexed)",static_content
+"$\varepsilon_{IR,\text{sodium}}$",Sodium incidence effect ratio passed to the transition model,static_content
+"$\varepsilon_{CF,\text{sodium}}$",Sodium case-fatality effect ratio (set to 1 in this model),static_content
+*Trans Fat Policy*,"",static_content
+"$TFA_{\text{current}}, TFA_{\text{target}}$",Current and target trans fat intake (% energy),static_content
+$\Delta TFA$,Trans fat reduction,static_content
+$RR_{\text{TFA}}$,Age-specific RR per 1% trans fat,static_content
+$E_{\text{TFA}}$,TFA intermediate proportional reduction in IHD case fatality,static_content
+"$T_{\text{TFA,start}}$",TFA policy start year,static_content
+"$\varepsilon_{IR,\text{TFA}}$",TFA incidence effect ratio (set to 1 in this model),static_content
+"$\varepsilon_{CF,\text{TFA}}$",TFA case-fatality effect ratio (IHD only; 1 otherwise),static_content
+*Statin Therapy*,"",static_content
+"$U_{0,\ell}$","Baseline statin coverage at $T_{\text{stat,start}}$ (coverage already in place)",static_content
+$U_{\text{target}}$,"Target total statin coverage by $T_{\text{stat,end}}$",static_content
+"$\Delta U(t,\ell)$",Incremental statin coverage above baseline at time $t$,static_content
+"$T_{\text{stat,start}}, T_{\text{stat,end}}$",Statin scale-up start and end years,static_content
+"$\alpha_{IR}, \alpha_{CF}$",Adherence for incidence (primary) and case fatality (secondary) effects,static_content
+"$AF_{c,\ell}$",Cause- and location-specific attributable fraction (used for incidence only),static_content
+$\psi_{\text{athero}}$,Proportion of ischemic stroke that is atherosclerotic (applies to CF only),static_content
+"$RR^{IR}_{c}, RR^{CF}_{c}$",Trial-based relative risks for incidence and case fatality,static_content
+"$\delta^{IR}_{c}, \delta^{CF}_{c}$",Risk reductions $=1-RR$ for incidence and case fatality,static_content
+"$E^{IR}_{c,\ell}(t), E^{CF}_{c,\ell}(t)$",Incremental effect sizes applied to $IR$ and $CF$ (baseline-adjusted denominators),static_content
+"$\varepsilon_{IR,\text{statin}}, \varepsilon_{CF,\text{statin}}$",Statin effect ratios passed to the transition model,static_content
+*Combined Effects*,"",static_content
+"$\varepsilon_{IR,j}, \varepsilon_{CF,j}$","Generic effect ratios for intervention $j\in\{\text{BP},\text{sodium},\text{TFA},\text{statin}\}$",static_content
+"$\varepsilon_{IR,\text{total}}, \varepsilon_{CF,\text{total}}$",Combined effect ratios (multiplicative across interventions),static_content
+*State Transition Model*,"",static_content
+"$BG.mx, BG.mx.all$","Background mortality (cause-specific, all-cause)",static_content
+$covid.mx$,COVID-19 mortality (2020--2021),static_content
+$\text{PREV}$,Baseline disease prevalence,static_content
+$\text{DIS.mx}$,Baseline disease mortality,static_content
+$\text{ALL.mx}$,All-cause mortality,static_content

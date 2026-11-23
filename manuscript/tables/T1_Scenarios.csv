@@ -1,0 +1,13 @@
+Intervention,Outcomes Impacted,RR,Risk population,Baseline level (2025),Target,Scale-up pattern,baseline_value,baseline_unit,status
+Improved Hypertension Control,"IHD, Ischemic Stroke, Hemorrhagic Stroke, Hypertensive Heart Disease","IR per 10 mmHg reduction in SBP (age-specific/SBP- specific)
+CF per 10 mmHg reduction in SBP
+CF/IR: 0.83 IHD
+CF/IR 0.73 stroke
+CF/IR 0.72 HHD",Adults 20 + y with hypertension,37 % of hypertensives treated to SBP < 140 mmHg,50 % controlled by 2040,Linear,,% controlled (preserved),Intervention=static_content; Outcomes Impacted=static_content; RR=static_content; Risk population=static_content; Baseline level (2025)=preserved_pending; Target=static_content; Scale-up pattern=static_content; baseline_value=preserved_pending; baseline_unit=static_content
+Population Sodium Reduction,"IHD, Ischemic Stroke, Hemorrhagic Stroke, Hypertensive Heart Disease","IR per 1 g/day reduction in sodium intake:
+IR: 0.83 IHD
+IR 0.73 stroke
+IR 0.72 HHD",Adults 20 +,Mean intake 4.1 g/day,−30 % (2.9 g) by 2030,Linear,4.14998092107637,g/day,Intervention=static_content; Outcomes Impacted=static_content; RR=static_content; Risk population=static_content; Baseline level (2025)=reproduced; Target=static_content; Scale-up pattern=static_content; baseline_value=reproduced; baseline_unit=static_content
+TFA Elimination,IHD,CF: 1.07-1.21per 1 %E energy from industrial (Age dependent),Adults 20 +,0.4% of energy intake,0 % by 2028,Linear,0.414192800143167,% of energy,Intervention=static_content; Outcomes Impacted=static_content; RR=static_content; Risk population=static_content; Baseline level (2025)=reproduced; Target=static_content; Scale-up pattern=static_content; baseline_value=reproduced; baseline_unit=static_content
+Improved Statin Uptake,IHD and Ischemic Stroke,"CF: 0.8 IHD Everybody. Ischemic stroke (100%) with atherosclerotic cause (60% fixed)
+IR: 0.78 Applied only to the proportion with Diabetes AF",Adults 40+ with prior IHD or stroke (secondary),7 % coverage of statins as primary prevention,60 % by 2050,Linear,6.56741055472289,% coverage,Intervention=static_content; Outcomes Impacted=static_content; RR=static_content; Risk population=static_content; Baseline level (2025)=reproduced; Target=static_content; Scale-up pattern=static_content; baseline_value=reproduced; baseline_unit=static_content
