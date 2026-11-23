@@ -1,0 +1,12 @@
+check,value
+identity_rerun_max_rel_diff,0
+selection_never_worse,TRUE
+max_tied_pairs,1
+saved_rates_max_rel_diff,0
+n_strata,26112
+n_target_cells,287232
+n_seed_year_cells,26112
+open_age_seed_ratio,3.26783
+seed_population,"UN-WPP single year (PopulationsSingleAge0050.rds), ages >= 95 summed into age 95"
+n_workers,12
+n_location_groups,36

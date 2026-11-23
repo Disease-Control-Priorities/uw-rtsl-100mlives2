@@ -4,60 +4,83 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-R modeling project for the Resolve to Save Lives "100 million lives" paper. It estimates CVD deaths delayed in 2025–2050 from four interventions: hypertension control, sodium reduction, trans-fat (TFA) elimination and statins. It adapts the Kontis et al. (2019) multistate framework to GBD 2023 inputs and UN WPP 2024 populations. There is no package build, linter or automated test suite (`tests/` holds only a README). You check work by re-running scripts and inspecting the outputs.
+R modeling project for the Resolve to Save Lives "100 million lives" paper. It estimates CVD deaths delayed in 2026–2050 from four interventions: hypertension control, sodium reduction, trans-fat (TFA) elimination and statins. It adapts the Kontis et al. (2019) multistate framework to GBD 2023 inputs and UN WPP 2024 populations. There is no package build, linter or automated test suite (`tests/` holds only a README). You check work by re-running scripts and inspecting the outputs (stage 5 and stage 6 also run their own validation checks and stop on failure).
 
-## Running things
+## Running the pipeline
 
-All scripts use **absolute paths** that are hardcoded to the author's OneDrive folder (`wd <- "C:/Users/wrgar/OneDrive - UW/.../uw-rtsl-100mlives2/"`). Path globals are defined in `code/0. master.R` and redefined in the reporting Rmd:
+`code/0. master.R` is the single entry point. It loads the libraries, defines the path globals, sources `code/functions_review_6_100.R`, declares all settings, then sources each stage. It takes stage numbers as arguments (default: all):
 
-- `wd_raw` = `data-raw/`: original GBD, UN WPP, NCD-RisC, sodium, TFA and statin sources. These are gitignored except `*.md`, so they are not in the repo.
+```
+Rscript "code/0. master.R" 5 6 7     # calibration, baseline, model
+```
+
+Stage scripts are **not standalone**: they need the globals `0. master.R` sets up (paths, libraries, `dx_include`, `cause_map`/`cause_cols`, the `run_*` flags, `cal_config`, `stage7_first_year`). Stage 6 builds `b_rates`, `data.in`, `inc`, `bpcats` and `repYear` **in memory** for stage 7, so stages 6 and 7 must run in the same R session. Some stages call `setwd()` (`wd_raw`, `wd_temp`, `wd`), so relative paths change between stages.
+
+Paths are **absolute**, hardcoded to the author's OneDrive folder (`wd <- "C:/Users/wrgar/OneDrive - UW/.../uw-rtsl-100mlives2/"`):
+
+- `wd_code` = `code/`
+- `wd_raw` = `data-raw/`: original GBD, UN WPP, NCD-RisC, sodium, TFA and statin sources. Gitignored except `*.md`.
 - `wd_data` = `data/processed/`: prepared model inputs.
 - `wd_outp` = `output/`
-- `wd_temp` = `temp/`: per-location intermediate files. Gitignored.
-
-The pipeline stage scripts in `code/` are **not standalone**. They expect the globals that `0. master.R` sets up: the path variables, the loaded libraries, `dx_include`, `cause_map`/`cause_cols`, the `run_*` flags, and the functions from `functions_review_6_100.R`. Several stages also call `setwd()` (to `wd_raw`, `wd_temp` or `wd`), so relative paths change from one stage to the next. To run a single stage, first run the setup section of `0. master.R` (through `source("functions_review_6_100.R")`) and then source that stage.
-
-**Known mismatch:** the `source()` calls in `0. master.R` use old filenames such as `"1.get_base_rates_100_gbd23.R"`, `"5.calibration_100.R"` and `"7.model_100_multiplicative_func_new3.R"`. The real files have a space after the number and some carry a `_gbd23`/`_noaroc` suffix (for example `"5. calibration_100_gbd23.R"`). Use the real filenames.
-
-Render reports and the manuscript with rmarkdown:
-
-```
-Rscript -e "rmarkdown::render('reports/UWRTSL-100MLivesRMD_Output.Rmd')"
-Rscript -e "rmarkdown::render('manuscript/manuscript-100mlives2.Rmd')"   # → Word via reference.docx + word-layout.lua
-```
+- `wd_temp` = `temp/`: intermediate files and calibration pilots. Gitignored.
 
 ## Pipeline and data flow
 
 | Stage | Script (`code/`) | Main outputs |
 |---|---|---|
 | 1 | `1. get_base_population_100.R` | `data/processed/UN2024/PopulationsSingleAge0050.rds`, `PopulationsAge20_*.csv`; `data-raw/GBD/totalpop_baseline_ihme.rds` |
-| 1 | `1. get_base_rates_100_gbd23.R` | `baseline_rates_part{1..5}.rds`, root `locs.rds`, `data-raw/GBD/temp_1baseline_rates_gbd23.rds` (reused by stages 2, 5, 6) |
-| 2 | `2. get_tps_100_gbd23.R` | `tps_inpt_part{1..5}.rds` |
+| 1 | `1. get_base_rates_100_gbd23.R` | `baseline_rates_part{1..5}.rds`, root `locs.rds`, `data-raw/GBD/temp_1baseline_rates_gbd23.rds` (GBD targets, reused later) |
+| 2 | `2. get_tps_100_gbd23.R` | `tps_inpt_part{1..5}.rds` (historical transition probabilities) |
 | 2 | `2. get_tps_bgmx_100_gbd23.R` | `tps_bgmx_{,all_,cvd_}forecasted.rds`, `tps_bgmx_cvd_ihme.rds` (background-mortality forecasts) |
 | 3 | `3. risk_factors_100.R` (+ `_sodium.R` validation vs older GBD rounds) | `Sodium/sodium_data.rds`, `TFAPolicy/tfa_data.rds`, `Statins/af_statins.rds` |
-| 4 | `4. interventions_100_tfa2_statins2.R` | `Sodium/sodium_policy_scenarios.rds`, `TFAPolicy/tfa_policy_scenarios.rds`, `Statins/statin_data.rds`, HTN coverage functions (`covfxn2.csv`) |
-| 5 | `5. calibration_100_gbd23.R` | parallel calibration (`makeCluster(14)`) → `adjusted_searo_part{1..10}.rds` |
-| 6 | `6. adjustments_100_gbd23.R` | root `adjustments2023_age.csv` |
+| 4 | `4. interventions_100_tfa2_statins2.R` | `Sodium/sodium_policy_scenarios.rds`, `TFAPolicy/tfa_policy_scenarios.rds`, `Statins/statin_data.rds`, `BloodPressure/hbp_control_data.rds`, `covfxn2.csv` |
+| 5 | `5. calibration.R` | `adjusted_searo_part{1..10}.rds` (calibrated historical IR/CF, 2000–2019) and `output/calibration/calibration_*` diagnostics |
+| 6 | `6. build_baseline.R` | in-memory projection panel 2017–2050 for stage 7 (no files) |
 | 7 | `7. model_100_multiplicative_func_new3_gbd23_noaroc.R` | `output/out_model/model_output_part_<Country>.rds` + `log_<Country>.txt` |
 
-Large tables are split into `*_partN.rds` files and read back with `list.files(pattern=...)` followed by `rbindlist`. Some inputs live at the **repo root**, not under `data/`: `bp_data6.csv`, `add_cov_data.csv`, `Country_groupings_extended.csv`, `ettehad_rr_bp_reduction_10mmHg.csv`, `adjustments2023_age.csv`, `wpp.adj.Rda`, `locs.rds`.
+Stages 8 (`8. run_sensitivity.R`) and 9 (`9. run_benchmark.R`) are wired into the master script but the scripts do not exist yet.
 
-## Model (stage 7) structure
+**Legacy files, kept but not sourced:** `5. calibration_100_gbd23.R` and `5. adjustments_100_gbd23.R` (the old two-pass calibration that wrote root `adjustments2023_age.csv`). `4.prepare_interventions.R` is a byte-identical copy of the stage-4 script.
 
-- `project.all(Country, ...)` runs the multistate well/sick/dead projection for one country. Causes are IHD, ischemic stroke, intracerebral hemorrhage and hypertensive heart disease. Intervention modules adjust incidence (`eff_ir`) and case fatality (`eff_cf`) multiplicatively:
-  - `calculate_antihypertensive_impact_etihad`, which uses Ettehad BP-reduction RRs
-  - `calculate_sodium_impact_etihad`
-  - `calculate_tfa_impact`
-  - `calculate_statins_impact`
-- `run_multiple_scenarios()` loops over the named `scenarios` list: `baseline`, `bp_only`, `sodium_only`, `tfa_only`, `statins_only`, `bp_sodium`, `bp_sodium_tfa` and `all_four`.
-- Scenario parameters are globals defined just before the parallel run. They include `target_control` (0.5 by 2040), `salteff` (30% by 2030), the TFA target (0 starting 2028), statin coverage (0.60 by 2050), the adherence values and `drugcov`.
-- Countries run in parallel with `foreach`/`doParallel` (`ncores <- 8`). **Any new helper function or data object used inside `project.all` must be added to the `clusterExport` varlist**, otherwise the workers fail. Errors are caught per country and written to that country's log file.
-- `validate_intervention_results()` checks for negative or NA states, mismatches in population conservation, and effect multipliers outside [0, 2].
+Large tables are split into `*_partN.rds` files and read back with `list.files(pattern=...)` followed by `rbindlist`. Some inputs live at the **repo root**: `bp_data6.csv` (`bp_data5.csv` in stage 4), `add_cov_data.csv`, `Country_groupings_extended.csv`, `ettehad_rr_bp_reduction_10mmHg.csv`, `ettehad_rr_bp_reduction_effects.xlsx`, `wpp.adj.Rda` (COVID excess mortality), `locs.rds`.
 
-`R/functions_review_6_100.R` duplicates `code/functions_review_6_100.R`. The master script sources the `code/` copy. `R/coverage_newfig.R` contains coverage-figure code.
+### Stage 5: calibration
+
+- `cal_config` in `0. master.R` is the **single source of truth** for every calibration setting (periods, grids, objective weights, caps, inputs, outputs, workers, pilot). `5. calibration.R` supplies no defaults and stops on any missing or invalid entry. Stage 6 reads its period and output entries.
+- One fit: for each location × sex × cause × GBD 5-year age band, a grid search over (m_IR, m_CF) minimizes `w_deaths·RMSE(deaths) + w_prev·RMSE(prevalent cases)` against GBD 2023 counts over 2009–2019. Ties go to the pair nearest the identity. The selected multipliers are applied once, constant over time, to the historical years only.
+- The calibration cohort **reproduces the recursion of `project.all()` in stage 7** (shared population across causes, age-20 re-seeding, the open-age-95 row not carried forward). If you change one, change the other.
+- Probability rule everywhere: `IR, CF ≤ min(tp_cap, 1 − BG.mx − feas_margin)`.
+- Each run writes `output/calibration/calibration_settings.rds` with a run id. Every `adjusted_searo_part*.rds` carries that id as an attribute, and stage 6 refuses chunks that don't match, or settings from a pilot run.
+- Set `cal_config$pilot_locations` to calibrate a few countries; pilot output goes under `temp/calibration_pilot/` and never overwrites production files.
+
+### Stage 6: baseline
+
+Reads the calibrated historical rates (read only), attaches UN WPP 2024 populations and age-20 cohorts, BP and coverage inputs, extends 2019 rates to 2020–2050, adds COVID excess mortality (2020–2021), applies the prospective secular trends (`run_bgmx_trend`, `run_CF_trend`, `run_CF_trend_80` = 80% of the CF trend, `run_CF_trend_ihme`) and final probability guards. All prospective assumptions belong here, never in the calibration. It checks that `stage7_first_year` matches the year stage 7 filters on, then trims `b_rates` to that year onward.
+
+### Stage 7: model
+
+- `project.all(Country, ...)` runs the multistate well/sick/dead projection for one country. Causes are IHD, ischemic stroke, intracerebral hemorrhage and hypertensive heart disease. Intervention modules adjust incidence (`eff_ir`) and case fatality (`eff_cf`) multiplicatively: `calculate_antihypertensive_impact_etihad` (Ettehad BP-reduction RRs), `calculate_sodium_impact_etihad`, `calculate_tfa_impact`, `calculate_statins_impact`.
+- `run_multiple_scenarios()` loops over the `scenarios` list: `baseline`, `bp_only`, `sodium_only`, `tfa_only`, `statins_only`, `bp_sodium`, `bp_sodium_tfa`, `all_four`.
+- Scenario parameters are globals set just before the parallel run: `target_control` (0.5 by 2040), `salteff` (30% by 2030), TFA target (0 from 2028), statin coverage (0.60 by 2050, start 2026), adherence and `drugcov`.
+- Countries run in parallel with `foreach`/`doParallel` (`ncores <- 8`). **Any new helper or data object used inside `project.all` must be added to the `clusterExport` varlist**, otherwise the workers fail. Errors are caught per country and written to its log.
+- Don't edit the stage-7 runner without the user's explicit approval. If workers die mid-run ("error reading from connection"), reduce workers and set `data.table::setDTthreads(1)` per worker from the calling session rather than changing the file.
+- `validate_intervention_results()` checks for negative or NA states, population-conservation mismatches and effect multipliers outside [0, 2].
+
+`R/functions_review_6_100.R` duplicates `code/functions_review_6_100.R` (the master sources the `code/` copy). `R/coverage_newfig.R` holds coverage-figure code.
 
 ## Reporting and manuscript
 
-- `reports/UWRTSL-100MLivesRMD_Output.Rmd` is the main analysis/report. It reads `output/out_model/*.rds` and the processed data, and it writes `output/out_*.png` figures and tables.
-- `manuscript/manuscript-100mlives2.Rmd` knits to Word. Its tables are read from `manuscript/manuscript-100mlives2.xlsx`, the "single source of truth". That workbook has one sheet per table (`T1_Scenarios`, `T2_DeathsDelayed`, `TS1_Regions` … `TS9_Assumptions`) plus `Index` and `Figures` sheets. Each table sheet has its title in row 1, headers in row 3, data from row 4, then a blank row and a Notes row. Figures come from `manuscript/figures/`.
-- `dev/prompt-reproducible-manuscript.md` describes a planned refactor. The goal is a new `reports/manuscript-100mlives2-artifacts.Rmd` that generates all manuscript artifacts (`manuscript/artifacts/*.rds`, `manuscript/tables/*.csv`, `manuscript/figures/*.png`, the regenerated xlsx), so that the manuscript Rmd only loads and displays them. Read that file before working on manuscript reproducibility.
+Two-step reproducible build, run from the repository root:
+
+```
+Rscript -e "rmarkdown::render('reports/manuscript-100mlives2-artifacts.Rmd', output_dir = tempdir())"
+Rscript -e "rmarkdown::render('manuscript/manuscript-100mlives2.Rmd')"   # → Word via reference.docx + word-layout.lua
+```
+
+- `reports/manuscript-100mlives2-artifacts.Rmd` is the **only** place manuscript numbers, tables and figures are calculated. It reads project inputs, `output/out_model/*.rds` and `output/calibration/*` (it never reruns the model) and writes `manuscript/artifacts/*.rds` (scalars, display tables, plot data, provenance), `manuscript/tables/*.csv` (T1, T2, TS1–TS10, Math_*), `manuscript/figures/*.png` (fig1–4, figS1–S6) and regenerates `manuscript/manuscript-100mlives2.xlsx` for tracking and review only. Conventions: data.table and ggplot2, no tidyverse, no `setwd()`, paths from the repo root via `rprojroot`. Takes about 3 minutes.
+- `manuscript/manuscript-100mlives2.Rmd` only loads those artifacts and displays them; it calculates nothing and never reads the xlsx. Uses `references.bib` and `apa.csl`.
+- Results that can't be recalculated yet keep legacy values tagged `REPRO_PENDING` in both Rmds.
+- Analysis windows: interventions start in 2026; cumulative totals use 2026–2050 (Table S8 keeps the legacy 2025–2050 window).
+- `reports/UWRTSL-100MLivesRMD_Output.Rmd` is the older exploratory analysis report. It writes `output/out_*.png` figures and tables.
+
+`dev/` holds the task prompts behind past and planned changes (`prompt-reproducible-manuscript.md`, `prompt-update_calibration.md`, `prompt_update_coherent_mortality_trends.md`). Read the relevant one before working in that area. `docs/` holds the math documentation and working-group drafts (gitignored except `*.md`).

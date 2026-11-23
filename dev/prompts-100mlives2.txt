@@ -1,5 +1,54 @@
 
 
+
+#########################################3
+#########################################
+
+write a prompt to ask claude code to:
+
+Goal: update the mortality trend process and results, including a new coherent Li et al. (2019) coherent forecast and description in the manuscript 
+
+Task: update code/2. get_tps_bgmx_100_gbd23 from adding Li et al process, following example 023_get_tps_bgmx.R from the other WHO project
+
+since now that method would be the defalut, update code/0.master.R
+
+Also update manuscript/manuscript-100mlives2.Rmd and reports/manuscript-100mlives2-artifacts.Rmd to have an accurate description of the trending projection process and benchmark results as in example in supplementary material (see WHO section Calibration methods and performance section in supplemental material. I won't attach this example to Claude, so describe carefully)
+
+Read code/6. build_baseline.R that prepared baseline for runner and takes trend inputsand code/7. model_100_multiplicative_func_new3_gbd23_noaroc.R that is the model runner for context, but do not update it; if needed, ask me first what should be modified
+
+If you identify a prompt that needs to be modified but I did not included,  list it and ask me if I should include it before starting the execution
+
+Use of the data. table library for coding is preferred 
+
+Export the prompt as a .md file
+
+modify manuscript/references.bib to add li et al reference
+
+
+
+#########################################3
+#########################################
+
+Write a prompt to ask Claude Code to update the calibration process 
+Goal: update the calibration process and results, including a new calibration description in the manuscript 
+Task: create code/5. calibration.R, this new code will replace code/5. calibration_100_gbd23.R for as the new calibration process
+create code/5. calibration.R using engine, loss function etc as in the 03_calibration_who.R example, so no longer double adjustments are needed 
+mandatory inputs for calibration, such a calibration weights, grids periods, etc must be declared only in code/0.master.R
+The outputs of the calibration process will be data/processed/adjusted_searo_part*.rds that feed code/6. build_baseline.R
+Notice that currently code/6. build_baseline.R applies an adjustment factor over calibration, so update is since adjustment will no longer be needed, as well as update
+0.main to reflect this. Note that calibration is always in sample, so when updating calibration, do not apply any projection adjustments. Those will be applied over 
+data/processed/adjusted_searo_part*.rds in  code/6. build_baseline.R
+Also update manuscript/manuscript-100mlives2.Rmd and reports/manuscript-100mlives2-artifacts.Rmd to have an accurate description of the calibration process and benchmark results in sample in supplementary material (see WHO section Calibration methods and performance section in supplemental material. I won't attach this example to Claude, so describe carefully)
+Read code/7. model_100_multiplicative_func_new3_gbd23_noaroc.R that is the model runner for context, but do not update it; if needed, ask me first what should be modified
+If you identify a prompt that needs to be modified but I did not included,  list it and ask me if I should include it before starting the execution
+Use of the data. table library for coding is preferred 
+Export the prompt as a .md file
+
+
+#########################################3
+#########################################
+
+
 write a prompt to ask claude code to:
 
 Goal: Update the manuscript markdown to have a fully reproducible manuscript
@@ -32,9 +81,6 @@ from existing inputs/ouputs. e.g. sensitivity analysis, so keep those as current
 
 export the prompt as a .md file
 
-
-
-
-#########################################
+#########################################3
 #########################################
 

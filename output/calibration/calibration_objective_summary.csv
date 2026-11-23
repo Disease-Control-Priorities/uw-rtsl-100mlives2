@@ -1,0 +1,3 @@
+stage,n_strata,J_identity,J_new,n_improved,n_unchanged,n_worsened,rel_change_J
+selection (grid minimum),26112,47844725.4252705,19441956.3436897,26049,63,0,-0.593644729468531
+joint (all selected pairs together),26112,47844725.4252705,22991389.6218651,22603,0,3509,-0.519458217859862

@@ -1,0 +1,9 @@
+rates,parameter,years,n_cells,n_capped_tp_cap,n_capped_feasibility,share_capped,rule
+uncalibrated,IR,2009-2019 (fit),1364352,31,1028,0.000776192654095131,"min(0.90, 1 - BG.mx - 0)"
+uncalibrated,IR,2000-2019 (all historical),2480640,66,2331,0.000966282894736842,"min(0.90, 1 - BG.mx - 0)"
+uncalibrated,CF,2009-2019 (fit),1364352,3473,35281,0.0284046932169997,"min(0.90, 1 - BG.mx - 0)"
+uncalibrated,CF,2000-2019 (all historical),2480640,6389,69994,0.0307916505417957,"min(0.90, 1 - BG.mx - 0)"
+calibrated,IR,2009-2019 (fit),1364352,0,209,0.000153186274509804,"min(0.90, 1 - BG.mx - 0)"
+calibrated,IR,2000-2019 (all historical),2480640,0,444,0.000178986068111455,"min(0.90, 1 - BG.mx - 0)"
+calibrated,CF,2009-2019 (fit),1364352,7723,20147,0.0204272797635801,"min(0.90, 1 - BG.mx - 0)"
+calibrated,CF,2000-2019 (all historical),2480640,13834,38031,0.0209079108617131,"min(0.90, 1 - BG.mx - 0)"

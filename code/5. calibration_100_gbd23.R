@@ -463,3 +463,5 @@ for (i in 1:10) {
     file = paste0(wd_data, "adjusted_searo_part", i, ".rds")
   )
 }
+
+source("5. adjustments_100_gbd23.R")

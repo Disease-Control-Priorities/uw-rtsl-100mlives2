@@ -1,0 +1,6 @@
+cause,n_strata,n_identity,n_ir_lower,n_ir_upper,n_cf_lower,n_cf_upper,n_any_bound,n_tied,ir_median,ir_q1,ir_q3,cf_median,cf_q1,cf_q3
+Hypertensive heart disease,6528,16,846,836,339,137,1695,0,0.8,0.6,0.95,0.9,0.8,0.95
+Intracerebral hemorrhage,6528,16,966,767,315,310,1849,0,0.7,0.6,0.9,0.9,0.8,0.95
+Ischemic heart disease,6528,17,1558,717,386,361,2326,0,0.7,0.5,0.9,0.9,0.8,1
+Ischemic stroke,6528,14,1237,769,372,381,2047,0,0.7,0.5,0.9,0.8,0.7,0.9
+All,26112,63,4607,3089,1412,1189,7917,0,0.7,0.5,0.9,0.9,0.7,0.95

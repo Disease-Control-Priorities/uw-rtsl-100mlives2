@@ -60,7 +60,9 @@ win_cum       <- yr_cum_start:yr_end
 # Table S8 keeps the legacy 2025-2050 window in every row: its alternative-trend rows cannot be
 # recomputed, and mixing windows inside one table would make the scenarios incomparable.
 yr_s8_start   <- 2025L
-yr_obs_end     <- 2018L                       # last calibration year plotted (report: b_rates[year < 2019])
+yr_obs_end     <- 2018L                       # last input-derived historical year plotted (report: b_rates[year < 2019])
+src_input <- "Model inputs: GBD 2023 rates x UN-WPP 2024"   # historical deaths implied by inputs, not simulated
+src_bau   <- "This study: BAU projection"
 yr_model_start <- 2019L                       # first projection year plotted from the model outputs
 
 # ---- Intervention labels (report chunk `output-data`) --------------------------------------------
@@ -156,7 +158,10 @@ FIG_DONE <- list()
 Every manuscript-specific number, table and figure, in manuscript order. Status values:
 `reproduced` (calculated here from repo inputs/outputs), `fixed_external` (published literature,
 hard-coded with citation), `static_content` (author-written text) and `preserved_pending` (a model
-result that cannot be recalculated yet; legacy value kept and tagged `REPRO_PENDING`). Tables that
+result that cannot be recalculated yet; legacy value kept and tagged `REPRO_PENDING`). Preserved model
+results (sensitivity runs, Kontis-methods replications, counterfactual runs, Figures S3 and S4a) come from
+runs with the legacy two-pass calibration: they predate the single-pass calibration in `code/5. calibration.R`
+and are not consistent with the current model outputs until regenerated. Tables that
 combine statuses are `mixed`; their cell-level status is in the CSV `status` column and in the workbook
 shading. `legacy` is the value currently displayed in the manuscript/workbook: it is the kept value for
 non-reproduced items and the comparison baseline for reproduced ones. Input codes are defined in the
@@ -278,6 +283,71 @@ kontis_methods_tfa_text|scalar|Comparison TFA|preserved_pending|text|just over 4
 tfa_bans_since_2017_M|scalar|Comparison TFA|preserved_pending|million|10|none|TFA bans since 2017|14.8 minus a replication value|none in report|artifacts/scalars.rds|Kontis-methods replication runs
 tfa_india_ban_M|scalar|Comparison TFA|preserved_pending|million|4|none|India TFA ban counterfactual|not in outputs|none in report|artifacts/scalars.rds|TFA run without India's 2021 limit
 htn_aroc_threshold_pp|scalar|Methods: Interventions and scenario modeling|static_content|pp/year|3|NCD:controlled|NCD-RisC 2019; 50% by 2040|threshold claim; count of countries above it is printed in section 20|out-policy-bp-past|artifacts/scalars.rds|
+cal_fit_years|scalar|Methods: Calibration; Supplement: Calibration|reproduced|years|new|CALS:config|saved stage-5 settings|fit_start-fit_end (value = number of fitted years)|calibration|artifacts/scalars.rds|
+cal_n_fit_years|scalar|Supplement: Calibration (T in the objective)|reproduced|count|new|CALS:config|saved stage-5 settings|number of fitted years|calibration|artifacts/scalars.rds|
+cal_target_source|scalar|Supplement: Calibration; Table S10 notes; Figure S6 notes|reproduced|text|new|CALS:config|saved stage-5 settings|target source label (value = number of target measures)|calibration|artifacts/scalars.rds|
+cal_n_zero_targets|scalar|Supplement: Calibration|reproduced|count|new|CALS:target|all calibrated locations; both measures|target cells equal to zero (kept as observed zeros)|calibration|artifacts/scalars.rds|
+cal_hist_years|scalar|Supplement: Calibration|reproduced|years|new|CALS:config|saved stage-5 settings|first-last historical year receiving the factors (value = number of years)|calibration|artifacts/scalars.rds|
+cal_proj_years|scalar|Methods: Calibration|reproduced|years|new|CALS:config|saved stage-5 settings|first-last projection year built by stage 6 (value = number of years)|calibration|artifacts/scalars.rds|
+cal_n_locations_cal|scalar|Supplement: Calibration|reproduced|count|new|CALS:locations_calibrated|saved stage-5 settings|number of calibrated locations|calibration|artifacts/scalars.rds|
+cal_n_countries|scalar|Supplement: Calibration|reproduced|count|new|CALP:location; MO:location|manuscript countries in the fit panel|number of manuscript countries reported|calibration|artifacts/scalars.rds|
+cal_n_cells|scalar|Supplement: Calibration|reproduced|count|new|CALP|manuscript countries; fit window; per measure|target cells per measure|calibration|artifacts/scalars.rds|
+cal_n_bands|scalar|Supplement: Calibration|reproduced|count|new|CALS:config|age bands|number of GBD five-year age bands (terminal band open)|calibration|artifacts/scalars.rds|
+cal_n_strata|scalar|Supplement: Calibration|reproduced|count|new|CALF|manuscript countries|country x sex x cause x age band strata|calibration|artifacts/scalars.rds|
+cal_n_pairs|scalar|Methods: Calibration; Supplement: Calibration|reproduced|count|new|CALS:config|IR x CF grid|number of candidate multiplier pairs|calibration|artifacts/scalars.rds|
+cal_ir_grid|scalar|Methods: Calibration; Supplement: Calibration|reproduced|text|new|CALS:config|IR grid|min-max (value = number of IR values)|calibration|artifacts/scalars.rds|
+cal_cf_grid|scalar|Methods: Calibration; Supplement: Calibration|reproduced|text|new|CALS:config|CF grid|min-max (value = number of CF values)|calibration|artifacts/scalars.rds|
+cal_ir_grid_values|scalar|Supplement: Calibration|reproduced|text|new|CALS:config|IR grid|listed values (value = number of values)|calibration|artifacts/scalars.rds|
+cal_cf_grid_values|scalar|Supplement: Calibration|reproduced|text|new|CALS:config|CF grid|listed values (value = number of values)|calibration|artifacts/scalars.rds|
+cal_w_deaths|scalar|Methods: Calibration; Supplement: Calibration|reproduced|weight|new|CALS:config|objective|weight on RMSE of deaths|calibration|artifacts/scalars.rds|
+cal_w_prev|scalar|Methods: Calibration; Supplement: Calibration|reproduced|weight|new|CALS:config|objective|weight on RMSE of prevalent cases|calibration|artifacts/scalars.rds|
+cal_tp_cap|scalar|Methods: Calibration; Supplement: Calibration|reproduced|probability|new|CALS:config|probability rule|upper bound on IR and CF|calibration|artifacts/scalars.rds|
+cal_wape_deaths_uncal|scalar|Methods: Calibration; Supplement: Calibration|reproduced|%|new|CALP|manuscript countries; fit window; deaths|sum abs(uncalibrated - observed) / sum observed|calibration|artifacts/scalars.rds|
+cal_wape_deaths_cal|scalar|Methods: Calibration; Supplement: Calibration|reproduced|%|new|CALP|as above|sum abs(calibrated - observed) / sum observed|calibration|artifacts/scalars.rds|
+cal_wape_prev_uncal|scalar|Methods: Calibration; Supplement: Calibration|reproduced|%|new|CALP|manuscript countries; fit window; prevalent cases|WAPE, uncalibrated|calibration|artifacts/scalars.rds|
+cal_wape_prev_cal|scalar|Methods: Calibration; Supplement: Calibration|reproduced|%|new|CALP|as above|WAPE, calibrated|calibration|artifacts/scalars.rds|
+cal_bias_deaths_uncal|scalar|Supplement: Calibration|reproduced|%|new|CALP|manuscript countries; fit window; deaths|sum uncalibrated / sum observed - 1 (signed)|calibration|artifacts/scalars.rds|
+cal_bias_deaths_cal|scalar|Supplement: Calibration|reproduced|%|new|CALP|as above|sum calibrated / sum observed - 1 (signed)|calibration|artifacts/scalars.rds|
+cal_bias_prev_uncal|scalar|Supplement: Calibration|reproduced|%|new|CALP|manuscript countries; fit window; prevalent cases|aggregate bias, uncalibrated (signed)|calibration|artifacts/scalars.rds|
+cal_bias_prev_cal|scalar|Supplement: Calibration|reproduced|%|new|CALP|as above|aggregate bias, calibrated (signed)|calibration|artifacts/scalars.rds|
+cal_cwape_deaths_med_uncal|scalar|Supplement: Calibration|reproduced|%|new|CALP|country WAPE of deaths|median across manuscript countries, uncalibrated|calibration|artifacts/scalars.rds|
+cal_cwape_deaths_med_cal|scalar|Supplement: Calibration|reproduced|%|new|CALP|country WAPE of deaths|median, calibrated|calibration|artifacts/scalars.rds|
+cal_cwape_deaths_iqr_uncal|scalar|Supplement: Calibration|reproduced|% range|new|CALP|country WAPE of deaths|IQR, uncalibrated (value = Q1)|calibration|artifacts/scalars.rds|
+cal_cwape_deaths_iqr_cal|scalar|Supplement: Calibration|reproduced|% range|new|CALP|country WAPE of deaths|IQR, calibrated (value = Q1)|calibration|artifacts/scalars.rds|
+cal_cwape_prev_med_uncal|scalar|Supplement: Calibration|reproduced|%|new|CALP|country WAPE of prevalent cases|median, uncalibrated|calibration|artifacts/scalars.rds|
+cal_cwape_prev_med_cal|scalar|Supplement: Calibration|reproduced|%|new|CALP|country WAPE of prevalent cases|median, calibrated|calibration|artifacts/scalars.rds|
+cal_cwape_prev_iqr_uncal|scalar|Supplement: Calibration|reproduced|% range|new|CALP|country WAPE of prevalent cases|IQR, uncalibrated (value = Q1)|calibration|artifacts/scalars.rds|
+cal_cwape_prev_iqr_cal|scalar|Supplement: Calibration|reproduced|% range|new|CALP|country WAPE of prevalent cases|IQR, calibrated (value = Q1)|calibration|artifacts/scalars.rds|
+cal_n_improve_deaths|scalar|Supplement: Calibration|reproduced|count|new|CALP|manuscript countries|countries whose deaths WAPE is lower after calibration|calibration|artifacts/scalars.rds|
+cal_n_improve_prev|scalar|Supplement: Calibration|reproduced|count|new|CALP|manuscript countries|countries whose prevalence WAPE is lower after calibration|calibration|artifacts/scalars.rds|
+cal_n_worse_deaths|scalar|Supplement: Calibration|reproduced|count|new|CALP|manuscript countries|countries whose deaths WAPE is higher after calibration|calibration|artifacts/scalars.rds|
+cal_bands_worse_deaths|scalar|Supplement: Calibration|reproduced|text|new|CALP|manuscript countries; age bands|age bands whose deaths WAPE is higher after calibration (value = count)|calibration|artifacts/scalars.rds|
+cal_bands_worse_prev|scalar|Supplement: Calibration|reproduced|text|new|CALP|manuscript countries; age bands|age bands whose prevalence WAPE is higher after calibration (value = count)|calibration|artifacts/scalars.rds|
+cal_bias_deaths_95_uncal|scalar|Supplement: Calibration|reproduced|%|new|CALP|manuscript countries; 95+ band; deaths|aggregate bias, uncalibrated|calibration|artifacts/scalars.rds|
+cal_bias_deaths_95_cal|scalar|Supplement: Calibration|reproduced|%|new|CALP|manuscript countries; 95+ band; deaths|aggregate bias, calibrated|calibration|artifacts/scalars.rds|
+cal_sel_J_change_pct|scalar|Supplement: Calibration|reproduced|%|new|CALF|manuscript-country strata|sum of per-stratum grid-minimum J / sum of identity J - 1|calibration|artifacts/scalars.rds|
+cal_joint_J_change_pct|scalar|Supplement: Calibration|reproduced|%|new|CALF|manuscript-country strata|sum of joint-run J / sum of identity joint J - 1|calibration|artifacts/scalars.rds|
+cal_sel_worsened_n|scalar|Supplement: Calibration|reproduced|count|new|CALF|manuscript-country strata|strata whose selected grid score exceeds the identity score (must be 0)|calibration|artifacts/scalars.rds|
+cal_joint_improved_n|scalar|Supplement: Calibration|reproduced|count|new|CALF|manuscript-country strata|strata with lower J in the joint run than in the identity run|calibration|artifacts/scalars.rds|
+cal_joint_improved_pct|scalar|Methods: Calibration; Supplement: Calibration|reproduced|%|new|CALF|manuscript-country strata|share of strata improving jointly|calibration|artifacts/scalars.rds|
+cal_joint_worsened_n|scalar|Supplement: Calibration|reproduced|count|new|CALF|manuscript-country strata|strata with higher J in the joint run|calibration|artifacts/scalars.rds|
+cal_joint_worsened_pct|scalar|Supplement: Calibration|reproduced|%|new|CALF|manuscript-country strata|share of strata worsening jointly|calibration|artifacts/scalars.rds|
+cal_ir_median|scalar|Supplement: Calibration|reproduced|multiplier|new|CALF|manuscript-country strata|median selected IR multiplier|calibration|artifacts/scalars.rds|
+cal_ir_iqr|scalar|Supplement: Calibration|reproduced|range|new|CALF|manuscript-country strata|IQR of selected IR multipliers (value = Q1)|calibration|artifacts/scalars.rds|
+cal_cf_median|scalar|Supplement: Calibration|reproduced|multiplier|new|CALF|manuscript-country strata|median selected CF multiplier|calibration|artifacts/scalars.rds|
+cal_cf_iqr|scalar|Supplement: Calibration|reproduced|range|new|CALF|manuscript-country strata|IQR of selected CF multipliers (value = Q1)|calibration|artifacts/scalars.rds|
+cal_identity_n|scalar|Supplement: Calibration|reproduced|count|new|CALF|manuscript-country strata|strata keeping the identity pair (1, 1)|calibration|artifacts/scalars.rds|
+cal_ir_lower_n|scalar|Supplement: Calibration|reproduced|count|new|CALF|manuscript-country strata|strata at the lowest IR grid value|calibration|artifacts/scalars.rds|
+cal_ir_lower_pct|scalar|Supplement: Calibration|reproduced|%|new|CALF|as above|share of strata|calibration|artifacts/scalars.rds|
+cal_ir_upper_n|scalar|Supplement: Calibration|reproduced|count|new|CALF|manuscript-country strata|strata at the highest IR grid value|calibration|artifacts/scalars.rds|
+cal_ir_upper_pct|scalar|Supplement: Calibration|reproduced|%|new|CALF|as above|share of strata|calibration|artifacts/scalars.rds|
+cal_cf_lower_n|scalar|Supplement: Calibration|reproduced|count|new|CALF|manuscript-country strata|strata at the lowest CF grid value|calibration|artifacts/scalars.rds|
+cal_cf_lower_pct|scalar|Supplement: Calibration|reproduced|%|new|CALF|as above|share of strata|calibration|artifacts/scalars.rds|
+cal_cf_upper_n|scalar|Supplement: Calibration|reproduced|count|new|CALF|manuscript-country strata|strata at the highest CF grid value|calibration|artifacts/scalars.rds|
+cal_cf_upper_pct|scalar|Supplement: Calibration|reproduced|%|new|CALF|as above|share of strata|calibration|artifacts/scalars.rds|
+cal_any_bound_pct|scalar|Supplement: Calibration|reproduced|%|new|CALF|manuscript-country strata|share of strata with either multiplier at a grid boundary|calibration|artifacts/scalars.rds|
+cal_cf_capped_pct|scalar|Supplement: Calibration|reproduced|%|new|CALC|all calibrated locations; fit window; calibrated CF|share of CF cells where min(cap, 1 - BG.mx) binds|calibration|artifacts/scalars.rds|
+cal_ir_capped_pct|scalar|Supplement: Calibration|reproduced|%|new|CALC|all calibrated locations; fit window; calibrated IR|share of IR cells where the probability rule binds|calibration|artifacts/scalars.rds|
 T1_Scenarios|table|Table 1|mixed|-|-|SOD:sodium_current; STA:statins_current; TFAD:tfa_current,age,year; POP:Nx; MS|baseline column: 2025 values (TFA: GBD 2024 at ages 50-54), 2019 UN-WPP all-age weights, 190 countries|baseline column: population-weighted means; other columns static text|out-policy-salt; out-policy-tf; out-policy-statins|tables/T1_Scenarios.csv; artifacts/tables_display.rds|HTN baseline (37%) preserved: source not identified
 T2_DeathsDelayed|table|Table 2|reproduced|million|-|MO:dead,cause|5 interventions vs BAU; W; all-CVD and cause rows|BAU, projected, DD, DD/25, DD/BAU|out-tab-int-caut; out-tab-int-cau|tables/T2_DeathsDelayed.csv; artifacts/tables_display.rds|
 TS1_Regions|table|Table S1|reproduced|-|-|MO:location; CG:location_wb,Super_region|190 countries|countries listed by region|output-countrylist|tables/TS1_Regions.csv; artifacts/tables_display.rds|
@@ -289,6 +359,8 @@ TS6_Premature_Top30|table|Table S6|reproduced|deaths|-|MO:dead,age,pop|All vs BA
 TS7_ByCountry|table|Table S7|reproduced|deaths|-|MO:dead,location; CG|All vs BAU; W; 190 countries|BAU, projected, DD, DD/25, DD/BAU|out-tab-loc|tables/TS7_ByCountry.csv; artifacts/tables_display.rds|
 TS8_Sensitivity|table|Table S8|mixed|million|-|MO:dead (base rows); legacy|all rows 2025-2050 (yr_s8_start), the legacy window of the preserved rows; base rows: main scenario|base rows reproduced except per-year (legacy /24); other rows preserved|none in report|tables/TS8_Sensitivity.csv; artifacts/tables_display.rds|alternative-trend simulation outputs (on 2026-2050); per-year divisor
 TS9_Assumptions|table|Table S9|static_content|-|-|MS|-|author-written|-|tables/TS9_Assumptions.csv; artifacts/tables_display.rds|
+TS10_Calibration|table|Table S10|reproduced|%|-|CALP; CG:Super_region,wb2021|manuscript countries; 2009-2019; deaths and prevalent cases|in-sample WAPE and aggregate bias, uncalibrated vs calibrated joint run, by cause, sex, age band, region, income group and country|calibration|tables/TS10_Calibration.csv; artifacts/tables_display.rds|
+TS10_Calibration_Detail|table|Supplement: companion to Table S10 (not displayed)|reproduced|count; %|-|CALP|every calibrated location (manuscript flag); 2009-2019|country x measure x cause x sex totals, WAPE and bias|calibration|tables/TS10_Calibration_Detail.csv|
 Math_CF_ReductionFactors|table|Supplement: math (Step 9)|static_content|-|-|MS; MC (checked)|-|inline pipe table, checked against cf_reduction_per_control|-|tables/Math_CF_ReductionFactors.csv|
 Math_TFA_RR|table|Supplement: math (TFA)|static_content|-|-|MS; MC (checked)|-|inline pipe table, checked against rr_per_1percent|-|tables/Math_TFA_RR.csv|
 Math_Statin_RR|table|Supplement: math (statins)|static_content|-|-|MS; MC (checked)|-|inline pipe table, checked against rr_ir_* and rr_cf_*|-|tables/Math_Statin_RR.csv|
@@ -308,8 +380,9 @@ figS2a_required_htn_scaleup.png|figure|Figure S2 (top)|reproduced|pp/year|-|NCD:
 figS2b_historical_cascade_changes.png|figure|Figure S2 (bottom)|reproduced|pp|-|NCD:Country,Sex,Year,diagnosed,treated,controlled|NCD-RisC 2000-2019 and 2010-2019|year-to-year changes, boxplots by sex|out-policy-bp-past|figures/figS2b_historical_cascade_changes.png|
 figS3_asmr_by_cause.png|figure|Figure S3|preserved_pending|per 100,000|-|BR; MO; standard weights|ASMR, 2000-2050|legacy PNG kept|output-mortality (ASMR)|figures/figS3_asmr_by_cause.png|verified standard-population weights and a per-person denominator
 figS4a_asmr_index_vs_foresight.png|figure|Figure S4 (top)|preserved_pending|index|-|BR; MO; FOR asr files; standard weights|ASMR index 2019 = 100|legacy PNG kept|valida-ihme-foresight|figures/figS4a_asmr_index_vs_foresight.png|verified standard-population weights
-figS4b_deaths_vs_foresight.png|figure|Figure S4 (bottom)|reproduced|million|-|BR:Nx,DIS.mx.t0; MO:dead; FOR:Year,Value|BAU; 190 countries; both sexes; 20+; 2000-2050|deaths by cause vs Foresight Reference|valida-ihme-foresight2|figures/figS4b_deaths_vs_foresight.png; artifacts/plot_data.rds|
-figS5_deaths_vs_unwpp.png|figure|Figure S5|reproduced|million|-|BR:Nx,DIS.mx.t0,BG.mx.all; MO:all.mx; UND:deaths_unwpp|BAU; by sex; ages 20+; 2000-2050|all-cause deaths vs UN-WPP|output-mortality|figures/figS5_deaths_vs_unwpp.png; artifacts/plot_data.rds|
+figS4b_deaths_vs_foresight.png|figure|Figure S4 (bottom)|reproduced|million|-|BR:Nx,DIS.mx.t0; MO:dead; FOR:Year,Value|2000-2018: model inputs (GBD 2023 rates x UN-WPP 2024 population, not simulated); 2019-2050: BAU; 190 countries; both sexes; 20+|deaths by cause vs Foresight Reference|valida-ihme-foresight2|figures/figS4b_deaths_vs_foresight.png; artifacts/plot_data.rds|
+figS5_deaths_vs_unwpp.png|figure|Figure S5|reproduced|million|-|BR:Nx,DIS.mx.t0,BG.mx.all; MO:all.mx; UND:deaths_unwpp|2000-2018: model inputs (not simulated); 2019-2050: BAU; by sex; ages 20+|all-cause deaths vs UN-WPP|output-mortality|figures/figS5_deaths_vs_unwpp.png; artifacts/plot_data.rds|
+figS6_calibration_fit.png|figure|Figure S6|reproduced|million|-|CALP|manuscript countries summed; 2009-2019; both sexes; ages 20-95+|annual GBD 2023 targets vs uncalibrated and calibrated joint runs, by cause and measure (in sample)|calibration|figures/figS6_calibration_fit.png; artifacts/plot_data.rds|
 "
 inventory <- fread(text = trimws(inv_txt), sep = "|", quote = "", header = TRUE, colClasses = "character",
                    strip.white = TRUE)
@@ -319,17 +392,23 @@ check(all(inventory$status %in% c("reproduced", "fixed_external", "static_conten
       "unknown status in inventory")
 
 input_legend <- data.table(
-  code = c("MO", "CG", "POP", "UND", "BR", "HBP", "SOD", "TFAS", "TFAD", "STA", "NCD", "FOR", "POW", "ETT", "MC", "LIT", "MS"),
+  code = c("MO", "CG", "POP", "UND", "BR", "HBP", "SOD", "TFAS", "TFAD", "STA", "NCD", "FOR", "POW", "ETT", "MC", "LIT", "MS",
+           "CALS", "CALP", "CALF", "CALC", "BL"),
   path = c("output/out_model/model_output_part_<Country>.rds", "Country_groupings_extended.csv",
            "data/processed/UN2024/PopulationsSingleAge0050.rds", "data/processed/UN2024/DeathsSingleAge0050.rds",
-           "data/processed/adjusted_searo_part<N>.rds", "data/processed/BloodPressure/hbp_control_data.rds",
+           "data/processed/adjusted_searo_part<N>.rds (stage-5 calibrated historical rates)", "data/processed/BloodPressure/hbp_control_data.rds",
            "data/processed/Sodium/sodium_policy_scenarios.rds", "data/processed/TFAPolicy/tfa_policy_scenarios.rds",
            "data/processed/TFAPolicy/tfa_data.rds", "data/processed/Statins/statin_data.rds",
            "data-raw/NCD-RisC/NCD-RisC_Lancet_2021_Hypertension_age_standardised_countries.csv",
            "data-raw/GBD/gbd2023_foresight_dx_<cause>20+.csv (GBD 2019 Foresight, per the file footer)",
            "data-raw/dt_sodium_powles_2013.csv", "ettehad_rr_bp_reduction_10mmHg.csv",
            "code/7. model_100_multiplicative_func_new3_gbd23_noaroc.R (read as text)",
-           "published literature (hard-coded with citation)", "author-written manuscript content (hard-coded)"),
+           "published literature (hard-coded with citation)", "author-written manuscript content (hard-coded)",
+           "output/calibration/calibration_settings.rds (stage 5: resolved settings, run id, input fingerprints)",
+           "output/calibration/calibration_fit_panel.rds (stage 5: targets vs uncalibrated and calibrated joint runs)",
+           "output/calibration/calibration_factors.csv (stage 5: selected multipliers, grid and joint scores)",
+           "output/calibration/calibration_cap_audit.csv (stage 5: cells where the probability rule binds)",
+           "code/6. build_baseline.R (read as text: projection-preparation constants)"),
   columns = c("scenario, intervention, location, cause, sex, age, year, well, sick, dead, pop, all.mx",
               "iso3, location_wb, Super_region", "location, year_id, age, Nx", "location, year, sex, age, deaths_unwpp",
               "location, year, sex, age, cause, Nx, DIS.mx.t0, BG.mx.all", "location, year, baseline_ctrl, control_scaled",
@@ -337,7 +416,11 @@ input_legend <- data.table(
               "location, year, sex, age, tfa_current", "location, year, statins_uptake, statins_current",
               "Country/Region/World, ISO, Sex, Year, proportions diagnosed/treated/controlled",
               "Scenario, Location, Sex, Age, Measure, Year, Cause of death or injury, Value",
-              "location, sodium_powles_2010", "Cause, SBP_Category, RR", "parameter constants", "-", "-"))
+              "location, sodium_powles_2010", "Cause, SBP_Category, RR", "parameter constants", "-", "-",
+              "run_id, completed, config, locations_calibrated, inputs, checks",
+              "measure, location, sex, cause, age_group, year, observed, uncalibrated, calibrated, seed_year",
+              "location, sex, cause, age_group, ir_mult, cf_mult, bounds, id/sel/joint scores, selection_change, joint_change",
+              "rates, parameter, years, n_cells, n_capped_tp_cap, n_capped_feasibility", "parameter constants"))
 
 knitr::kable(input_legend, caption = "Input codes used in the inventory")
 knitr::kable(inventory[, .N, by = .(type, status)], caption = "Inventory counts by type and status")
@@ -364,7 +447,12 @@ in_files <- list(
   FOR  = rp("data-raw", "GBD", sprintf("gbd2023_foresight_dx_%s20+.csv", names(cause_map))),
   POW  = rp("data-raw", "dt_sodium_powles_2013.csv"),
   ETT  = rp("ettehad_rr_bp_reduction_10mmHg.csv"),
-  MC   = rp("code", "7. model_100_multiplicative_func_new3_gbd23_noaroc.R"))
+  MC   = rp("code", "7. model_100_multiplicative_func_new3_gbd23_noaroc.R"),
+  BL   = rp("code", "6. build_baseline.R"),
+  CALS = rp("output", "calibration", "calibration_settings.rds"),
+  CALP = rp("output", "calibration", "calibration_fit_panel.rds"),
+  CALF = rp("output", "calibration", "calibration_factors.csv"),
+  CALC = rp("output", "calibration", "calibration_cap_audit.csv"))
 need_files(unlist(in_files))
 in_files$BR <- sort(list.files(rp("data", "processed"), pattern = "^adjusted_searo_part[0-9]+\\.rds$", full.names = TRUE))
 check(length(in_files$BR) > 0, "no data/processed/adjusted_searo_part*.rds files")
@@ -507,9 +595,23 @@ check(nrow(FOR[, .N, by = .(year, cause_of_death_or_injury)][N > 1]) == 0, "Fore
 POW <- fread(in_files$POW); need_cols(POW, c("location", "sodium_powles_2010"), "POW")
 ETT <- fread(in_files$ETT); need_cols(ETT, c("Cause", "SBP_Category", "RR"), "ETT")
 
-# Calibration-period rates (report chunk `output-incidence`): observed deaths for 2000-2018 in Fig S4b and S5.
+# ---- Stage-5 calibration run: provenance (saved results only; nothing is recalibrated here) ----
+CALS <- readRDS(in_files$CALS)
+check(!isTRUE(CALS$pilot), "output/calibration holds a pilot calibration run")
+cal_completed <- as.POSIXct(substr(CALS$completed, 1, 19), format = "%Y-%m-%d %H:%M:%S")
+check(!is.na(cal_completed), "calibration_settings.rds: unreadable completion time")
+check(setequal(basename(in_files$BR), CALS$out_files), "adjusted_searo chunks on disk differ from the calibration run's files")
+mo_stale <- mo_files[file.mtime(mo_files) < cal_completed]
+check(length(mo_stale) == 0, paste0(length(mo_stale), " model output file(s) predate calibration run ", CALS$run_id,
+                                    " (rerun stage 7): ", paste(head(basename(mo_stale), 5), collapse = ", ")))
+check(all(locs %in% CALS$locations_calibrated), "manuscript countries missing from the calibration run")
+
+# Historical rates written by stage 5 (report chunk `output-incidence`). Only Nx, DIS.mx.t0 and BG.mx.all are
+# used: deaths implied by the model INPUTS for 2000-2018 in Fig S4b and S5 (not a simulated or calibrated fit).
 BR <- rbindlist(lapply(in_files$BR, function(f) {
-  x <- readRDS(f); setDT(x)
+  x <- readRDS(f)
+  check(identical(attr(x, "calibration_run_id"), CALS$run_id), paste(basename(f), "is not from calibration run", CALS$run_id))
+  setDT(x)
   need_cols(x, c("location", "year", "sex", "age", "cause", "Nx", "DIS.mx.t0", "BG.mx.all"), basename(f))
   x[!is.na(location) & year <= yr_obs_end & location %in% locs, .(location, year, sex, age, cause, Nx, DIS.mx.t0, BG.mx.all)]
 }))
@@ -980,7 +1082,7 @@ cause_code <- setNames(names(cause_map), cause_map)
 s4_obs <- BR[, .(deaths = sum(Nx * DIS.mx.t0)), by = .(year, cause = cause_code[cause])]
 s4_mod <- B[year >= yr_model_start, .(deaths = sum(bau)), by = .(year, cause)]
 s4_for <- FOR[year >= 2000, .(year, cause = cause_code[cause_of_death_or_injury], deaths = value, source = "GBD Foresight")]
-s4 <- rbind(rbind(s4_obs, s4_mod)[, source := "This Study"], s4_for)
+s4 <- rbind(s4_obs[, source := src_input], s4_mod[, source := src_bau], s4_for)
 s4[, cause_label := cause_map[cause]]
 PD$figS4b <- s4[, .(year, cause, source, deaths)]
 g_s4b <- ggplot(s4, aes(x = year, y = deaths / 1e6, colour = source, group = source)) +
@@ -1000,13 +1102,15 @@ scM("val_unwpp_2050_M", UND[year == 2050, sum(deaths_unwpp)], 1)
 # 15. Figure S5: all-cause deaths vs UN-WPP
 
 Report chunk `output-mortality`: UN-WPP deaths at ages 20+ for all locations in the file; this study =
-calibration deaths 2000-2018 (cause-specific + background, one population copy) and BAU `all.mx` from 2019,
-for the 190 modelled countries.
+deaths implied by the model inputs 2000-2018 (GBD 2023 cause-specific + background rates x UN-WPP 2024
+population, one population copy; not simulated, not a calibration fit) and BAU `all.mx` from 2019, for the
+190 modelled countries. In-sample calibration performance is in section 21.
 
 ```{r figS5}
 s5_obs <- merge(BR[, .(dx = sum(Nx * DIS.mx.t0)), by = .(year, sex)],
                 BR[cause == cause_map[["ihd"]], .(bg = sum(Nx * BG.mx.all)), by = .(year, sex)], by = c("year", "sex"))
-s5 <- rbind(s5_obs[, .(year, sex, deaths = dx + bg)], AC[, .(deaths = sum(all_mx)), by = .(year, sex)])[, source := "This study"]
+s5 <- rbind(s5_obs[, .(year, sex, deaths = dx + bg, source = src_input)],
+            AC[, .(deaths = sum(all_mx)), by = .(year, sex)][, source := src_bau])
 s5 <- rbind(s5, UND[year <= yr_end, .(deaths = sum(deaths_unwpp)), by = .(year, sex)][, source := "UNWPP 2024"])
 s5[, line_type := ifelse(year > 2019, "dashed", "solid")]
 PD$figS5 <- s5[, .(year, sex, source, deaths)]
@@ -1339,6 +1443,13 @@ ms_txt <- paste(readLines(rp("manuscript", "manuscript-100mlives2.Rmd"), warn = 
 math_in_ms <- vapply(math_md, function(m) grepl(trimws(m$md), ms_txt, fixed = TRUE), logical(1))
 
 # ---- Parameter check: manuscript tables/text vs the model code ----
+# Projection-preparation constants (COVID cap) now live in stage 6 (code/6. build_baseline.R), read as text.
+bl_txt <- readLines(in_files$BL, warn = FALSE)
+bl_num <- function(pattern) {
+  hit <- regmatches(bl_txt, regexpr(pattern, bl_txt, perl = TRUE))
+  check(length(hit) >= 1, paste("stage-6 constant not found:", pattern))
+  as.numeric(sub(pattern, "\\1", hit[length(hit)], perl = TRUE))
+}
 cf_line <- grep("cf_reduction_per_control = c\\(", mc_txt, value = TRUE)[1]
 cf_mc <- as.numeric(strsplit(sub(".*c\\(([^)]*)\\).*", "\\1", cf_line), ",")[[1]])
 tfa_lines <- grep("^\\s*age >= [0-9]+( & age <= [0-9]+)?, [0-9.]+,", mc_txt, value = TRUE)
@@ -1362,7 +1473,7 @@ param_chk <- data.table(
                  mc_num("rr_cf_ihd\\s*<-\\s*([0-9.]+)"), mc_num("rr_cf_istroke\\s*<-\\s*([0-9.]+)"),
                  mc_num("prop_athero_stroke\\s*=\\s*([0-9.]+)"),
                  mc_num("intervention_rates\\[CF > ([0-9.]+), CF"), mc_num("intervention_rates\\[IR > ([0-9.]+), IR"),
-                 mc_num("b_rates\\[covid\\.mx>=1, covid\\.mx:=([0-9.]+)\\]"),
+                 bl_num("b_rates\\[covid\\.mx>=1, covid\\.mx:=([0-9.]+)\\]"),
                  mc_num("rr_ir_ihd\\s*<-\\s*([0-9.]+)"), ett_tot[["Coronary heart disease"]], ett_tot[["Stroke"]], ett_tot[["Heart failure"]],
                  mp$adherence_ir, mp$adherence_cf, mp$control_start_year, mp$control_target_year, mp$saltyear1,
                  mp$tfa_policy_start_year, NA, mp$target_control, mp$control_target_year, mp$salteff, mp$saltyear2,
@@ -1380,7 +1491,253 @@ cat(sprintf("Methods claim check: %d NCD-RisC countries need more than 3 pp/year
             aroc_gt3, max(aroc$y2040)))
 ```
 
-# 21. Scalars: assemble, check and save
+# 21. Calibration methods and in-sample performance: Table S10, Figure S6, Methods numbers
+
+Reads the saved stage-5 results only (`output/calibration/`; run id checked against the calibrated chunks and
+the model outputs in section 2). Nothing is recalibrated here. Performance compares the uncalibrated
+(identity) and calibrated JOINT cohort runs (all selected multipliers applied together, exactly as saved) with
+the GBD 2023 targets on exactly the same cells: manuscript countries, both sexes, four causes, every age band
+and every fitted year. WAPE = sum |predicted - observed| / sum observed; aggregate bias = sum predicted / sum
+observed - 1. Both are undefined (shown as "undefined", never 0) when the observed total is 0. All results
+are in sample: this is not an external or temporal validation.
+
+```{r calibration}
+cfgc <- CALS$config
+fit_years <- cfgc$fit_start:cfgc$fit_end
+yrs_txt <- function(y) sprintf("%d–%d", min(y), max(y))
+CALP <- readRDS(in_files$CALP); setDT(CALP)
+need_cols(CALP, c("measure", "location", "sex", "cause", "age_group", "year", "observed", "uncalibrated", "calibrated"), "CALP")
+check(setequal(unique(CALP$location), CALS$locations_calibrated), "fit panel locations differ from the calibration run")
+check(setequal(unique(CALP$year), fit_years), "fit panel years differ from the saved fitting window")
+check(setequal(unique(CALP$age_group), cfgc$age_band_labels) && setequal(unique(CALP$cause), cause_map) &&
+      setequal(unique(CALP$sex), cfgc$sexes) && setequal(unique(CALP$measure), c("deaths", "prevalence")),
+      "fit panel: unexpected bands, causes, sexes or measures")
+check(!anyDuplicated(CALP, by = c("measure", "location", "sex", "cause", "age_group", "year")), "fit panel: duplicated cells")
+check(all(is.finite(CALP$observed) & CALP$observed >= 0 & is.finite(CALP$uncalibrated) & is.finite(CALP$calibrated)),
+      "fit panel: missing, negative or non-finite values")
+pm <- CALP[location %in% locs]
+n_cells_ms <- length(locs) * length(cfgc$sexes) * length(cause_map) * length(cfgc$age_band_labels) * length(fit_years)
+check(nrow(pm) == 2L * n_cells_ms, "fit panel is incomplete for the manuscript countries")
+
+# groupings already used by the project: region (Table S1) and World Bank 2021 income group (wb2021),
+# both from Country_groupings_extended.csv, matched on ISO3 (section 2 recodes South Sudan to SDS)
+INC <- fread(in_files$CG, select = c("iso3", "wb2021"))
+INC <- unique(rbind(INC, INC[iso3 == "SSD"][, iso3 := "SDS"])[!is.na(wb2021) & wb2021 != ""], by = "iso3")
+inc_label <- c(LIC = "Low income", LMIC = "Lower-middle income", UMIC = "Upper-middle income", HIC = "High income")
+check(all(INC$wb2021 %in% names(inc_label)), "unexpected wb2021 income codes")
+grp <- CD[, .(location, iso3, region)]
+grp[INC, income := unname(inc_label[i.wb2021]), on = "iso3"]
+pm[grp, `:=`(region = i.region, income = i.income), on = "location"]
+check(!anyNA(pm$region), "fit panel: manuscript country without a region")
+n_no_income <- pm[is.na(income), uniqueN(location)]
+
+wape_bias <- function(d, by) {
+  d[, .(n_countries = uniqueN(location), n_cells = .N, observed = sum(observed), uncalibrated = sum(uncalibrated),
+        calibrated = sum(calibrated), abs_err_uncal = sum(abs(uncalibrated - observed)),
+        abs_err_cal = sum(abs(calibrated - observed))), keyby = by][
+    , `:=`(wape_uncal = fifelse(observed > 0, abs_err_uncal / observed, NA_real_),
+           wape_cal   = fifelse(observed > 0, abs_err_cal / observed, NA_real_),
+           bias_uncal = fifelse(observed > 0, uncalibrated / observed - 1, NA_real_),
+           bias_cal   = fifelse(observed > 0, calibrated / observed - 1, NA_real_))][]
+}
+levels_tab <- list(
+  list(group = "All",                            by = NA_character_, order = "All"),
+  list(group = "Cause",                          by = "cause",       order = unname(cause_map)),
+  list(group = "Sex",                            by = "sex",         order = cfgc$sexes),
+  list(group = "Age group (years)",              by = "age_group",   order = cfgc$age_band_labels),
+  list(group = "Region",                         by = "region",      order = sort(unique(pm$region))),
+  list(group = "Income group (World Bank 2021)", by = "income",      order = unname(inc_label)),
+  list(group = "Country",                        by = "location",    order = sort(locs)))
+cal_rows <- rbindlist(lapply(seq_along(levels_tab), function(k) {
+  L <- levels_tab[[k]]
+  if (is.na(L$by)) {
+    s <- wape_bias(pm, "measure")[, subgroup := "All"]
+  } else {
+    s <- wape_bias(pm[!is.na(get(L$by))], c("measure", L$by)); setnames(s, L$by, "subgroup")
+  }
+  s[, `:=`(group = L$group, g_ord = k, s_ord = match(subgroup, L$order))]
+  check(!anyNA(s$s_ord), paste("Table S10: unexpected subgroup in", L$group))
+  s
+}), use.names = TRUE)
+cw <- dcast(cal_rows, g_ord + s_ord + group + subgroup ~ measure,
+            value.var = c("n_countries", "n_cells", "observed", "uncalibrated", "calibrated",
+                          "wape_uncal", "wape_cal", "bias_uncal", "bias_cal"))
+setorder(cw, g_ord, s_ord)
+check(all(cw$n_countries_deaths == cw$n_countries_prevalence) && all(cw$n_cells_deaths == cw$n_cells_prevalence),
+      "Table S10: deaths and prevalence cover different cells")
+ts10_csv <- cw[, .(Group = group, Subgroup = subgroup, Countries = n_countries_deaths, `Cells per measure` = n_cells_deaths,
+                   `Deaths observed` = observed_deaths, `Deaths uncalibrated` = uncalibrated_deaths,
+                   `Deaths calibrated` = calibrated_deaths,
+                   `Deaths WAPE uncalibrated` = wape_uncal_deaths, `Deaths WAPE calibrated` = wape_cal_deaths,
+                   `Deaths bias uncalibrated` = bias_uncal_deaths, `Deaths bias calibrated` = bias_cal_deaths,
+                   `Prevalent cases observed` = observed_prevalence, `Prevalent cases uncalibrated` = uncalibrated_prevalence,
+                   `Prevalent cases calibrated` = calibrated_prevalence,
+                   `Prevalent cases WAPE uncalibrated` = wape_uncal_prevalence, `Prevalent cases WAPE calibrated` = wape_cal_prevalence,
+                   `Prevalent cases bias uncalibrated` = bias_uncal_prevalence, `Prevalent cases bias calibrated` = bias_cal_prevalence)]
+pc1 <- function(x, signed = FALSE) ifelse(is.na(x), "undefined",
+                                          formatC(100 * x, format = "f", digits = 1, flag = if (signed) "+" else ""))
+arrow <- function(a, b, signed = FALSE) paste(pc1(a, signed), "→", pc1(b, signed))
+ts10_disp <- data.frame(
+  Group = blank_repeats(ts10_csv$Group), Subgroup = ts10_csv$Subgroup,
+  Countries = fmt_int(ts10_csv$Countries), `Cells per measure` = fmt_int(ts10_csv$`Cells per measure`),
+  `Deaths WAPE (%)` = arrow(ts10_csv$`Deaths WAPE uncalibrated`, ts10_csv$`Deaths WAPE calibrated`),
+  `Deaths bias (%)` = arrow(ts10_csv$`Deaths bias uncalibrated`, ts10_csv$`Deaths bias calibrated`, TRUE),
+  `Prevalent cases WAPE (%)` = arrow(ts10_csv$`Prevalent cases WAPE uncalibrated`, ts10_csv$`Prevalent cases WAPE calibrated`),
+  `Prevalent cases bias (%)` = arrow(ts10_csv$`Prevalent cases bias uncalibrated`, ts10_csv$`Prevalent cases bias calibrated`, TRUE),
+  check.names = FALSE)
+pct_cols <- grep("WAPE|bias", names(ts10_csv), value = TRUE)
+cnt_cols <- grep("observed|uncalibrated$|calibrated$", setdiff(names(ts10_csv), pct_cols), value = TRUE)
+add_table("TS10_Calibration", ts10_csv, ts10_disp, "reproduced", bold = 1L,
+          numfmt = c(setNames(rep("0.0%", length(pct_cols)), pct_cols), setNames(rep("#,##0", length(cnt_cols)), cnt_cols),
+                     Countries = "#,##0", `Cells per measure` = "#,##0"))
+
+# machine-readable companion: every calibrated location x measure x cause x sex (manuscript flag)
+det <- wape_bias(CALP, c("location", "measure", "cause", "sex"))
+det_csv <- det[, .(Location = location, `In manuscript` = location %in% locs, Measure = measure, Cause = cause, Sex = sex,
+                   Cells = n_cells, Observed = observed, Uncalibrated = uncalibrated, Calibrated = calibrated,
+                   `WAPE uncalibrated` = wape_uncal, `WAPE calibrated` = wape_cal,
+                   `Bias uncalibrated` = bias_uncal, `Bias calibrated` = bias_cal)]
+det_disp <- data.frame(det_csv[, .(Location, `In manuscript` = ifelse(`In manuscript`, "yes", "no"), Measure, Cause, Sex,
+                                   Cells = fmt_int(Cells), Observed = fmt_int(Observed), Uncalibrated = fmt_int(Uncalibrated),
+                                   Calibrated = fmt_int(Calibrated), `WAPE uncalibrated` = pc1(`WAPE uncalibrated`),
+                                   `WAPE calibrated` = pc1(`WAPE calibrated`), `Bias uncalibrated` = pc1(`Bias uncalibrated`, TRUE),
+                                   `Bias calibrated` = pc1(`Bias calibrated`, TRUE))], check.names = FALSE)
+add_table("TS10_Calibration_Detail", det_csv, det_disp, "reproduced",
+          numfmt = c(Cells = "#,##0", Observed = "#,##0", Uncalibrated = "#,##0", Calibrated = "#,##0",
+                     `WAPE uncalibrated` = "0.0%", `WAPE calibrated` = "0.0%", `Bias uncalibrated` = "0.0%", `Bias calibrated` = "0.0%"))
+
+# ---- Figure S6: annual totals over the manuscript countries, fitting window only ----
+f6 <- pm[, .(`GBD 2023 target` = sum(observed), `Model, uncalibrated` = sum(uncalibrated),
+             `Model, calibrated (joint run)` = sum(calibrated)), by = .(measure, cause, year)]
+f6 <- melt(f6, id.vars = c("measure", "cause", "year"), variable.name = "series", value.name = "value")
+f6[, measure_label := factor(c(deaths = "Deaths", prevalence = "Prevalent cases")[measure], c("Deaths", "Prevalent cases"))]
+f6[, cause_label := factor(cause, unname(cause_map))]
+PD$figS6 <- f6[, .(measure, cause, year, series = as.character(series), value)]
+g_s6 <- ggplot(f6, aes(x = year, y = value / 1e6, colour = series, linetype = series)) +
+  geom_line(linewidth = 0.9) + geom_point(size = 1.3) +
+  facet_wrap(vars(measure_label, cause_label), nrow = 2, scales = "free_y", labeller = label_wrap_gen(width = 28, multi_line = FALSE)) +
+  scale_colour_manual(values = c("GBD 2023 target" = "black", "Model, uncalibrated" = "#D55E00",
+                                 "Model, calibrated (joint run)" = "#0072B2")) +
+  scale_linetype_manual(values = c("GBD 2023 target" = "solid", "Model, uncalibrated" = "dashed",
+                                   "Model, calibrated (joint run)" = "solid")) +
+  scale_x_continuous(breaks = seq(min(fit_years), max(fit_years), by = 2)) +
+  labs(x = "Year", y = "Millions", colour = NULL, linetype = NULL) +
+  theme_bw(base_size = 12) + theme(legend.position = "bottom", strip.text = element_text(size = 10))
+save_fig(g_s6, "figS6_calibration_fit.png", 11, 6.5)
+
+# ---- Scalars for the Methods text and the supplementary subsection ----
+cd <- cal_rows[group == "Country"]
+cq <- cd[, .(med_u = median(wape_uncal, na.rm = TRUE), med_c = median(wape_cal, na.rm = TRUE),
+             q1_u = quantile(wape_uncal, 0.25, na.rm = TRUE), q3_u = quantile(wape_uncal, 0.75, na.rm = TRUE),
+             q1_c = quantile(wape_cal, 0.25, na.rm = TRUE), q3_c = quantile(wape_cal, 0.75, na.rm = TRUE),
+             n_improve = sum(wape_cal < wape_uncal, na.rm = TRUE), n_undef = sum(is.na(wape_uncal))), keyby = measure]
+check(all(cq$n_undef == 0), "a manuscript country has an observed total of 0 (WAPE undefined); report it")
+ov <- cal_rows[group == "All"]
+b95 <- cal_rows[group == "Age group (years)" & subgroup == cfgc$age_band_labels[length(cfgc$age_band_labels)] & measure == "deaths"]
+CALF <- fread(in_files$CALF)
+need_cols(CALF, c("location", "sex", "cause", "age_group", "ir_mult", "cf_mult", "is_identity", "ir_at_lower", "ir_at_upper",
+                  "cf_at_lower", "cf_at_upper", "id_grid_error", "sel_error", "selection_change", "id_joint_error",
+                  "joint_error", "joint_change"), "CALF")
+fm <- CALF[location %in% locs]
+check(nrow(fm) == length(locs) * length(cfgc$sexes) * length(cause_map) * length(cfgc$age_band_labels) &&
+      !anyDuplicated(fm, by = c("location", "sex", "cause", "age_group")), "calibration factors incomplete for the manuscript countries")
+CALC <- fread(in_files$CALC)
+cap_share <- function(p) CALC[rates == "calibrated" & parameter == p & grepl("(fit)", years, fixed = TRUE), share_capped]
+check(length(cap_share("CF")) == 1 && length(cap_share("IR")) == 1, "cap audit rows not found")
+iqr_txt <- function(a, b, d = 1, mult = 100) sprintf("%s–%s", formatC(mult * a, format = "f", digits = d), formatC(mult * b, format = "f", digits = d))
+grid_txt <- function(g) sprintf("%s–%s", formatC(min(g), format = "f", digits = 2), formatC(max(g), format = "f", digits = 2))
+scS <- function(key, p, d = 1) set_sc(key, 100 * p, formatC(100 * p, format = "f", digits = d, flag = "+"))   # signed %
+scN <- function(key, n) set_sc(key, n, fmt_int(n))
+
+set_sc("cal_fit_years", length(fit_years), yrs_txt(fit_years))
+scN("cal_n_fit_years", length(fit_years))
+set_sc("cal_target_source", length(cfgc$target_measures), cfgc$target_source)
+check(identical(CALS$target$missing, 0L), "calibration run reports missing targets")
+scN("cal_n_zero_targets", CALS$target$zeros_deaths + CALS$target$zeros_prev)
+set_sc("cal_hist_years", length(cfgc$years_hist), yrs_txt(cfgc$years_hist))
+set_sc("cal_proj_years", length(cfgc$years_proj), yrs_txt(cfgc$years_proj))
+scN("cal_n_locations_cal", length(CALS$locations_calibrated))
+scN("cal_n_countries", length(locs))
+scN("cal_n_cells", n_cells_ms)
+scN("cal_n_bands", length(cfgc$age_band_labels))
+scN("cal_n_strata", nrow(fm))
+scN("cal_n_pairs", length(cfgc$ir_grid) * length(cfgc$cf_grid))
+set_sc("cal_ir_grid", length(cfgc$ir_grid), grid_txt(cfgc$ir_grid))
+set_sc("cal_cf_grid", length(cfgc$cf_grid), grid_txt(cfgc$cf_grid))
+set_sc("cal_ir_grid_values", length(cfgc$ir_grid), paste(formatC(cfgc$ir_grid, format = "f", digits = 2), collapse = ", "))
+set_sc("cal_cf_grid_values", length(cfgc$cf_grid), paste(formatC(cfgc$cf_grid, format = "f", digits = 2), collapse = ", "))
+set_sc("cal_w_deaths", cfgc$w_deaths, format(cfgc$w_deaths))
+set_sc("cal_w_prev", cfgc$w_prev, format(cfgc$w_prev))
+set_sc("cal_tp_cap", cfgc$tp_cap, formatC(cfgc$tp_cap, format = "f", digits = 2))
+scP("cal_wape_deaths_uncal", ov[measure == "deaths", wape_uncal])
+scP("cal_wape_deaths_cal",   ov[measure == "deaths", wape_cal])
+scP("cal_wape_prev_uncal",   ov[measure == "prevalence", wape_uncal])
+scP("cal_wape_prev_cal",     ov[measure == "prevalence", wape_cal])
+scS("cal_bias_deaths_uncal", ov[measure == "deaths", bias_uncal])
+scS("cal_bias_deaths_cal",   ov[measure == "deaths", bias_cal])
+scS("cal_bias_prev_uncal",   ov[measure == "prevalence", bias_uncal])
+scS("cal_bias_prev_cal",     ov[measure == "prevalence", bias_cal])
+scP("cal_cwape_deaths_med_uncal", cq["deaths", med_u])
+scP("cal_cwape_deaths_med_cal",   cq["deaths", med_c])
+set_sc("cal_cwape_deaths_iqr_uncal", 100 * cq["deaths", q1_u], iqr_txt(cq["deaths", q1_u], cq["deaths", q3_u]))
+set_sc("cal_cwape_deaths_iqr_cal",   100 * cq["deaths", q1_c], iqr_txt(cq["deaths", q1_c], cq["deaths", q3_c]))
+scP("cal_cwape_prev_med_uncal", cq["prevalence", med_u])
+scP("cal_cwape_prev_med_cal",   cq["prevalence", med_c])
+set_sc("cal_cwape_prev_iqr_uncal", 100 * cq["prevalence", q1_u], iqr_txt(cq["prevalence", q1_u], cq["prevalence", q3_u]))
+set_sc("cal_cwape_prev_iqr_cal",   100 * cq["prevalence", q1_c], iqr_txt(cq["prevalence", q1_c], cq["prevalence", q3_c]))
+scN("cal_n_improve_deaths", cq["deaths", n_improve])
+scN("cal_n_improve_prev",   cq["prevalence", n_improve])
+scN("cal_n_worse_deaths", cd[measure == "deaths", sum(wape_cal > wape_uncal)])
+band_list <- function(ms) {
+  b <- cal_rows[group == "Age group (years)" & measure == ms & wape_cal > wape_uncal][order(s_ord), subgroup]
+  sub("^([0-9]+)-([0-9]+)$", "\\1\u2013\\2", b)
+}
+and_list <- function(x) if (length(x) <= 1) x else paste(paste(x[-length(x)], collapse = ", "), "and", x[length(x)])
+bands_txt <- function(x) paste("the", and_list(x), if (length(x) == 1) "age band" else "age bands")
+bw_d <- band_list("deaths"); bw_p <- band_list("prevalence")
+check(length(bw_d) > 0 && length(bw_p) > 0, "text names age bands whose WAPE rose; none did for one measure (update the text)")
+set_sc("cal_bands_worse_deaths", length(bw_d), bands_txt(bw_d))
+set_sc("cal_bands_worse_prev", length(bw_p), bands_txt(bw_p))
+scS("cal_bias_deaths_95_uncal", b95$bias_uncal)
+scS("cal_bias_deaths_95_cal",   b95$bias_cal)
+scS("cal_sel_J_change_pct",   fm[, sum(sel_error) / sum(id_grid_error) - 1])
+scS("cal_joint_J_change_pct", fm[, sum(joint_error) / sum(id_joint_error) - 1])
+scN("cal_sel_worsened_n", fm[selection_change == "worsened", .N])
+check(SC$cal_sel_worsened_n$value == 0, "a selected grid pair scores worse than the identity (identity is in the grid)")
+scN("cal_joint_improved_n", fm[joint_change == "improved", .N])
+scP("cal_joint_improved_pct", fm[, mean(joint_change == "improved")])
+scN("cal_joint_worsened_n", fm[joint_change == "worsened", .N])
+scP("cal_joint_worsened_pct", fm[, mean(joint_change == "worsened")])
+set_sc("cal_ir_median", median(fm$ir_mult), formatC(median(fm$ir_mult), format = "f", digits = 2))
+set_sc("cal_ir_iqr", quantile(fm$ir_mult, 0.25), iqr_txt(quantile(fm$ir_mult, 0.25), quantile(fm$ir_mult, 0.75), 2, 1))
+set_sc("cal_cf_median", median(fm$cf_mult), formatC(median(fm$cf_mult), format = "f", digits = 2))
+set_sc("cal_cf_iqr", quantile(fm$cf_mult, 0.25), iqr_txt(quantile(fm$cf_mult, 0.25), quantile(fm$cf_mult, 0.75), 2, 1))
+scN("cal_identity_n", fm[is_identity == TRUE, .N])
+scN("cal_ir_lower_n", fm[ir_at_lower == TRUE, .N]); scP("cal_ir_lower_pct", fm[, mean(ir_at_lower)])
+scN("cal_ir_upper_n", fm[ir_at_upper == TRUE, .N]); scP("cal_ir_upper_pct", fm[, mean(ir_at_upper)])
+scN("cal_cf_lower_n", fm[cf_at_lower == TRUE, .N]); scP("cal_cf_lower_pct", fm[, mean(cf_at_lower)])
+scN("cal_cf_upper_n", fm[cf_at_upper == TRUE, .N]); scP("cal_cf_upper_pct", fm[, mean(cf_at_upper)])
+scP("cal_any_bound_pct", fm[, mean(ir_at_lower | ir_at_upper | cf_at_lower | cf_at_upper)])
+scP("cal_cf_capped_pct", cap_share("CF"), 2)
+scP("cal_ir_capped_pct", cap_share("IR"), 2)
+
+# the manuscript wording depends on these directions; stop rather than print a false statement
+check(ov[, all(wape_cal < wape_uncal)], "text says calibration reduced the WAPE of both measures")
+check(b95$bias_uncal < 0 && b95$bias_cal < 0, "text says 95+ deaths remain underestimated before and after")
+check(!anyNA(ts10_csv[, ..pct_cols]), "text says no Table S10 group has a zero observed total")
+check(SC$cal_n_worse_deaths$value >= 2, "text uses a plural for countries whose deaths WAPE rose")
+
+knitr::kable(ts10_disp[ts10_csv$Group != "Country", ], caption = "Table S10 (country rows omitted here)")
+knitr::kable(fm[, .(strata = .N, identity = sum(is_identity), ir_lower = sum(ir_at_lower), ir_upper = sum(ir_at_upper),
+                    cf_lower = sum(cf_at_lower), cf_upper = sum(cf_at_upper),
+                    joint_improved = sum(joint_change == "improved"), joint_worsened = sum(joint_change == "worsened")),
+                 keyby = age_group][order(match(age_group, cfgc$age_band_labels))],
+             caption = "Selected multipliers at grid boundaries and joint-run changes by age band (manuscript countries)")
+cat(sprintf("Calibration run %s (completed %s); %d manuscript countries without an income group.\n",
+            CALS$run_id, CALS$completed, n_no_income))
+```
+
+# 22. Scalars: assemble, check and save
 
 ```{r scalars}
 inv_sc <- inventory[type == "scalar"]
@@ -1398,7 +1755,7 @@ setcolorder(scalars, c("key", "value", "display", "unit", "status", "source", "l
 save_rds(scalars[, !"legacy"], "scalars.rds")
 ```
 
-# 22. Tables, plot data, provenance: save
+# 23. Tables, plot data, provenance: save
 
 ```{r save-tables}
 status_summary <- function(st, cols) {
@@ -1425,12 +1782,15 @@ provenance <- list(
   inventory = inventory, input_legend = input_legend, inputs_md5 = inputs_md5, model_log = mo_log,
   settings = list(yr_impl_start = yr_impl_start, yr_cum_start = yr_cum_start, yr_end = yr_end, n_impl_years = n_impl_years,
                   locs_exclude = locs_exclude, model_parameters = mp),
+  calibration = list(run_id = CALS$run_id, completed = CALS$completed, config = CALS$config, checks = CALS$checks,
+                     inputs = CALS$inputs, engine = CALS$engine,
+                     model_outputs_oldest = format(min(file.mtime(mo_files)), "%Y-%m-%d %H:%M:%S")),
   parameter_check = param_chk,
   session = list(R = R.version.string, packages = vapply(req_pkgs, function(p) as.character(packageVersion(p)), "")))
 save_rds(provenance, "provenance.rds")
 ```
 
-# 23. Tracking workbook
+# 24. Tracking workbook
 
 Rebuilt from the same objects with `openxlsx`. Layout per table sheet: title in row 1, headers in row 3,
 data from row 4, a blank row, `Notes:`, then a `Cell status:` legend. Titles and notes are the legacy ones.
@@ -1438,9 +1798,10 @@ data from row 4, a blank row, `Notes:`, then a `Cell status:` legend. Titles and
 ```{r workbook}
 wb_meta <- data.table(
   sheet = c("T1_Scenarios", "T2_DeathsDelayed", "TS1_Regions", "TS2_CompareIntervention", "TS3_CompareCountry", "TS4_ModelCompare",
-            "TS5_Premature_Sex", "TS6_Premature_Top30", "TS7_ByCountry", "TS8_Sensitivity", "TS9_Assumptions"),
-  item = c("Table 1", "Table 2", paste0("Table S", 1:9)),
-  location = c("Main text", "Main text", rep("Supplement", 9)),
+            "TS5_Premature_Sex", "TS6_Premature_Top30", "TS7_ByCountry", "TS8_Sensitivity", "TS9_Assumptions",
+            "TS10_Calibration", "TS10_Calibration_Detail"),
+  item = c("Table 1", "Table 2", paste0("Table S", 1:10), "Table S10 (companion)"),
+  location = c("Main text", "Main text", rep("Supplement", 11)),
   title = c("Intervention scenarios", "Deaths That Could Be Delayed by Different Interventions and Causes (Million)",
             "List of countries in each region.",
             "Estimated Deaths Delayed (Millions) From Scalable Cardiovascular Prevention Interventions: Comparison With Prior Global Modeling Studies by intervention",
@@ -1450,7 +1811,9 @@ wb_meta <- data.table(
             "Premature deaths delayed (<70 years) in the 30 most populous countries under combined interventions, 2025–2050",
             "Projected CVD deaths, number of deaths delayed, and percent deaths delayed between 2026 and 2050 if all the interventions were implemented, by country.",
             "Background and CVD mortality trends sensitivity scenarios on million deaths that could be delayed by intervention, 2026-2050",
-            "Structural Assumptions in the State-Transition Models"),
+            "Structural Assumptions in the State-Transition Models",
+            sprintf("In-sample calibration performance: weighted absolute percentage error and aggregate bias of deaths and prevalent cases before and after calibration, %s", yrs_txt(fit_years)),
+            sprintf("In-sample calibration performance by location, measure, cause and sex, every calibrated location, %s (machine-readable companion to Table S10)", yrs_txt(fit_years))),
   notes = c(
     "Modeled interventions are summarized with their target levels, affected outcomes, and scale-up trajectories. Baseline (2025) and target values are population-weighted using 2019 population estimates from UN-WPP 2024.",
     "Results are shown for all CVDs combined and for major causes, including hypertensive heart disease, hemorrhagic stroke, ischemic heart disease, and ischemic stroke. Column 3 presents projected deaths under each intervention modeled separately; these values reflect the full effect of each intervention on its own and should not be interpreted as contributions to the combined package. Rows labeled “All Interventions” represent the multiplicative joint impact of implementing all four interventions simultaneously across all causes. The final column expresses the proportional reduction as deaths delayed divided by projected deaths under business as usual.",
@@ -1462,17 +1825,22 @@ wb_meta <- data.table(
     "% deaths delayed <70 represents the proportion of all deaths delayed in each country that occur before age 70 years, serving as an indicator of the share of benefits attributable to premature mortality reduction.",
     "Region column added in this workbook for tracking (from Table S1); it is not displayed in the manuscript table.",
     "Projected deaths delayed (2026–2050) are shown under alternative assumptions for secular background and cardiovascular mortality trends, with results reported for individual interventions and their combined effects.",
-    "We used discrete-time Markov models stratified by single-year age (20–95+), sex, and calendar year (2019–2050). Interventions were assumed to be independent except for sodium reduction, which was linked to blood pressure and its downstream effects. Combined effects were applied multiplicatively to avoid double-counting and provide conservative estimates of joint impact."))
+    "We used discrete-time Markov models stratified by single-year age (20–95+), sex, and calendar year (2019–2050). Interventions were assumed to be independent except for sodium reduction, which was linked to blood pressure and its downstream effects. Combined effects were applied multiplicatively to avoid double-counting and provide conservative estimates of joint impact.",
+    sprintf("In-sample fit, not external or temporal validation. Targets: %s %s counts of deaths and prevalent cases, %s, %d countries, both sexes, four causes, %d age bands. Uncalibrated = stage-2 rates under the same probability bounds; calibrated = all selected multipliers applied together (joint run). WAPE = sum|predicted - observed| / sum observed; bias = sum predicted / sum observed - 1 (undefined when the observed total is 0). Cells per measure = country x sex x cause x age band x year cells; Countries = countries in the row (income-group coverage: %d countries without a group). Calibration run %s.",
+            cfgc$target_source, cfgc$target_metric, yrs_txt(fit_years), length(locs), length(cfgc$age_band_labels), n_no_income, CALS$run_id),
+    sprintf("Every location calibrated in run %s (In manuscript = reported in Table S10). Observed = %s %s; Uncalibrated and Calibrated = joint cohort runs. WAPE and bias as in Table S10.",
+            CALS$run_id, cfgc$target_source, cfgc$target_metric)))
 fig_meta <- data.table(
   figure = c("Figure 1", "Figure 1", "Figure 2", "Figure 3", "Figure 3", "Figure 4", rep("Figure S1", 4), "Figure S2", "Figure S2",
-             "Figure S3", "Figure S4", "Figure S4", "Figure S5"),
+             "Figure S3", "Figure S4", "Figure S4", "Figure S5", "Figure S6"),
   panel = c("A (annual)", "B (cumulative)", "-", "A (female)", "B (male)", "-", "A (hypertension control)", "B (sodium)", "C (TFA)",
-            "D (statins)", "A (required AROC)", "B (historical changes)", "-", "A (ASMR index)", "B (deaths)", "-"),
+            "D (statins)", "A (required AROC)", "B (historical changes)", "-", "A (ASMR index)", "B (deaths)", "-", "-"),
   file = c("fig1a_annual_deaths_delayed.png", "fig1b_cumulative_deaths_delayed.png", "fig2_deaths_delayed_sex_age.png",
            "fig3a_map_pct_delayed_female.png", "fig3b_map_pct_delayed_male.png", "fig4_deaths_delayed_sex_age_region.png",
            "figS1a_traj_hypertension_control.png", "figS1b_traj_sodium.png", "figS1c_traj_tfa.png", "figS1d_traj_statins.png",
            "figS2a_required_htn_scaleup.png", "figS2b_historical_cascade_changes.png", "figS3_asmr_by_cause.png",
-           "figS4a_asmr_index_vs_foresight.png", "figS4b_deaths_vs_foresight.png", "figS5_deaths_vs_unwpp.png"),
+           "figS4a_asmr_index_vs_foresight.png", "figS4b_deaths_vs_foresight.png", "figS5_deaths_vs_unwpp.png",
+           "figS6_calibration_fit.png"),
   title = c(rep("Deaths that could be delayed by time and intervention, 2026-2050", 2),
             "Deaths that could be delayed by sex, age, and intervention, 2026-2050",
             rep("Proportion of Deaths Delayed by Country and Sex Compared to the Business-as-Usual Scenario (2026–2050)", 2),
@@ -1481,8 +1849,9 @@ fig_meta <- data.table(
             rep("Required scale-up in hypertension control and historical year-to-year changes in the hypertension care cascade", 2),
             "Age-Standardized Mortality Rates by Cause Intervention Scenario, 2000-2050",
             rep("Comparison of Mortality Estimates and Forecasts vs GBD 2019 Foresight, 2000-2050", 2),
-            "Comparison of Global Death Estimates and Projections by Sex: Current Study vs UN-WPP 2024, 2000–2050"),
-  location = c(rep("Main text", 6), rep("Supplement", 10)),
+            "Comparison of Global Death Estimates and Projections by Sex: Current Study vs UN-WPP 2024, 2000–2050",
+            sprintf("In-sample calibration fit: annual deaths and prevalent cases, GBD 2023 targets vs uncalibrated and calibrated model, %s", yrs_txt(fit_years))),
+  location = c(rep("Main text", 6), rep("Supplement", 11)),
   notes = c(rep("Stacked area plots show the impact of each of the four interventions compared with business-as-usual. The top panel presents annual deaths delayed, while the bottom panel shows cumulative deaths delayed over time. Results are for the adult population aged 20+.", 2),
             "Deaths from the adult population aged 20+.",
             rep("Maps show the percentage reduction in cardiovascular deaths under the combined intervention scenario relative to the business-as-usual comparator. Results are presented separately for females (top) and males (bottom).", 2),
@@ -1490,8 +1859,9 @@ fig_meta <- data.table(
             rep("Spaghetti plots show country-specific baseline levels and projected implementation dynamics for the four intervention scenarios.", 4),
             rep("Required average annual increase in control to reach 50% by 2030/2040/2050 vs historical year-to-year changes (NCD-RisC 2000-2019).", 2),
             "Age-standardized mortality rates per 100,000, 2000-2050, WHO World Standard Population rescaled to ages 20-95+.",
-            rep("ASMR indices (top) and absolute deaths (bottom) vs GBD 2019 Foresight, ages 20-95+, both sexes.", 2),
-            "Total global deaths by sex, this study vs UN-WPP 2024."))
+            rep("ASMR indices (top) and absolute deaths (bottom) vs GBD 2019 Foresight, ages 20-95+, both sexes. Bottom panel: 2000-2018 deaths implied by the model inputs (not simulated), 2019-2050 BAU projection.", 2),
+            "Total global deaths by sex: deaths implied by the model inputs 2000-2018 (not simulated), BAU projection 2019-2050, UN-WPP 2024.",
+            "In sample: sums over the manuscript countries, both sexes and ages 20-95+, fitting window only. Aggregate agreement can conceal errors in individual countries, sexes and age bands (Table S10)."))
 fig_meta[, status := inventory[match(file, id), status]]
 check(!anyNA(fig_meta$status), "figure missing from the inventory")
 check(all(fig_meta[status == "reproduced", file] %in% names(FIG_DONE)), "a reproduced figure was not saved")
@@ -1569,7 +1939,7 @@ openxlsx::worksheetOrder(wb) <- match(c("Index", wb_meta$sheet, "Figures", "Scal
 openxlsx::saveWorkbook(wb, xlsx_out, overwrite = TRUE)
 ```
 
-# 24. Integrity checks
+# 25. Integrity checks
 
 ```{r integrity}
 t2c <- TB$T2_DeathsDelayed$csv
@@ -1597,7 +1967,21 @@ chk <- list(
   "Table S6 country set = 30 largest adult populations in 2025" = length(unique(TB$TS6_Premature_Top30$csv$Location)) == 30,
   "math tables verbatim in the manuscript" = all(math_in_ms),
   "every figure referenced by the manuscript exists" = all(file.exists(file.path(dir_fig, fig_meta$file))),
-  "every manuscript table has a CSV" = all(file.exists(file.path(dir_tab, paste0(c(wb_meta$sheet, names(math_md)), ".csv")))))
+  "every manuscript table has a CSV" = all(file.exists(file.path(dir_tab, paste0(c(wb_meta$sheet, names(math_md)), ".csv")))),
+  "calibration: chunks, fit panel and model outputs from one run (section 2)" = length(mo_stale) == 0 && setequal(basename(in_files$BR), CALS$out_files),
+  "calibration: Table S10 All row equals Figure S6 totals" =
+    isTRUE(all.equal(f6[, .(v = sum(value)), keyby = .(measure, series)]$v,
+                     as.vector(t(as.matrix(ov[order(measure), .(observed, uncalibrated, calibrated)]))), tolerance = 1e-12)),
+  "calibration: Table S10 country rows sum to the All row" =
+    all(abs(ts10_csv[Group == "Country", c(sum(`Deaths observed`), sum(`Deaths calibrated`), sum(`Prevalent cases observed`), sum(`Prevalent cases calibrated`))] -
+            ts10_csv[Group == "All", c(`Deaths observed`, `Deaths calibrated`, `Prevalent cases observed`, `Prevalent cases calibrated`)]) < 1e-3),
+  "calibration: every subgroup partition sums to the All row (deaths observed)" =
+    all(abs(ts10_csv[Group %in% c("Cause", "Sex", "Age group (years)", "Region"), sum(`Deaths observed`), by = Group]$V1 -
+            ts10_csv[Group == "All", `Deaths observed`]) < 1e-3),
+  "calibration: WAPE scalars equal Table S10 All row" =
+    abs(SC$cal_wape_deaths_cal$value / 100 - ts10_csv[Group == "All", `Deaths WAPE calibrated`]) < 1e-12 &&
+    abs(SC$cal_wape_prev_uncal$value / 100 - ts10_csv[Group == "All", `Prevalent cases WAPE uncalibrated`]) < 1e-12,
+  "calibration: Table S10 countries = manuscript countries" = setequal(ts10_csv[Group == "Country", Subgroup], locs))
 integrity <- data.table(check = names(chk), passed = unlist(chk))
 knitr::kable(integrity, caption = "Integrity checks")
 check(all(integrity$passed), paste("integrity checks failed:", paste(integrity[!(passed), check], collapse = "; ")))
@@ -1606,7 +1990,7 @@ knitr::kable(fig3_range[, .(sex, min = round(min, 1), max = round(max, 1))],
 knitr::kable(f3[pct < 5, .(location, sex, pct = round(pct, 1))], caption = "Figure 3: countries below 5% (shown in the 5-9% bin)")
 ```
 
-# 25. Comparison with the legacy manuscript and workbook
+# 26. Comparison with the legacy manuscript and workbook
 
 Printed in the knitted output only (not saved). Values are compared at their displayed precision; the
 legacy values are constants (from the manuscript text, or the legacy workbook for tables), never read
@@ -1616,7 +2000,8 @@ from the regenerated workbook.
 explain <- c(
   dd_stroke_all_M = "legacy 66.7 = 21.7 + 45.0 (sum of rounded values); at full precision 21.73 + 45.04 = 66.77",
   dd_tfa_per_year_k = "legacy 190,000 = 4.47M / 24; Table 2 (0.18M) and every other per-year value use / 25",
-  val_bau_2050_M = "legacy 34 matches the older run shown in the legacy Figure S4b; current outputs give 34.98M in 2050",
+  val_bau_2050_M = sprintf("legacy 34 matches the older run shown in the legacy Figure S4b; current outputs give %.2fM in 2050",
+                           SC$val_bau_2050_M$value),
   sodium_china_current_g = "7.0469 g/day rounds to 7.05; legacy truncated it",
   sodium_china_gbd23_vs_gbd10_pct = "7.0469 / 4.83 = 1.459, i.e. 46% higher; legacy text says about 40%",
   `TS5_Premature_Sex: Deaths Delayed (<70 years %)` = "legacy values equal DD<70 / ~105.9M for every row (not the note's estimand); regenerated as DD<70 / all DD for that intervention and sex, as the note defines",
@@ -1624,7 +2009,8 @@ explain <- c(
   `T2_DeathsDelayed: Deaths Delayed per Year` = "legacy cause rows divide by 24 (report deaths_summary() hard-codes /24); the all-CVD rows and the text divide by 25",
   `TS7_ByCountry: % Delayed (legacy stored at 2 decimals)` = "BAU now summed over 2026-2050 (legacy 2025-2050); the legacy % was also rounded to 2 decimals before display",
   `T1_Scenarios: Baseline level (2025)` = "2025 baseline (the note's estimand) is 4.150 g/day, just below the rounding boundary; the report's 2019 value (4.151) gave 4.2")
-sc_cmp <- scalars[status == "reproduced", .(item = key, legacy, reproduced = display)][legacy != reproduced]
+# calibration scalars (legacy = "new") did not exist in the legacy manuscript and are not compared
+sc_cmp <- scalars[status == "reproduced" & legacy != "new", .(item = key, legacy, reproduced = display)][legacy != reproduced]
 leg_t2 <- data.table(
   int = c("All", "HTN", "Sodium", "TFA", "Statins", "All", "HTN", "Sodium", "All", "HTN", "Sodium", "All", "HTN", "Sodium", "TFA", "Statins", "All", "HTN", "Sodium", "Statins"),
   proj = c(578.1, 621.8, 659.9, 691.7, 685.3, 57.8, 60.1, 64.2, 92.1, 106.9, 116.4, 300, 320.8, 335.3, 337.5, 331.7, 128.2, 134, 144, 149.3),
