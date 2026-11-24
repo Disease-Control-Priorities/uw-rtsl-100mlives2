@@ -11,7 +11,8 @@ output:
 reports/manuscript-100mlives2-artifacts.Rmd
 
 This file is the only executable source for manuscript-specific calculations, summaries, tables and figures.
-It reads existing project inputs and the stage-7 model outputs (it never reruns the model) and writes:
+It reads existing project inputs, the stage-7 model outputs and the stage-8 deterministic sensitivity outputs
+(output/uncertainty/dsa/; it never reruns the model or the sensitivity analyses) and writes:
   manuscript/artifacts/*.rds              scalars, display-ready tables, compact plot data, provenance
   manuscript/tables/*.csv                 every table the manuscript uses (numeric values + status column)
   manuscript/figures/*.png                every reproducible figure panel
@@ -57,10 +58,7 @@ n_impl_years  <- yr_end - yr_impl_start + 1L  # 25 = divisor for every "per year
 # projected totals and percentages differ from the legacy values.
 yr_cum_start  <- 2026L
 win_cum       <- yr_cum_start:yr_end
-# Table S8 keeps the legacy 2025-2050 window in every row: its alternative-trend rows cannot be
-# recomputed, and mixing windows inside one table would make the scenarios incomparable.
-yr_s8_start   <- 2025L
-yr_obs_end     <- 2018L                       # last input-derived historical year plotted (report: b_rates[year < 2019])
+yr_obs_end     <- 2018L                      # last input-derived historical year plotted (report: b_rates[year < 2019])
 src_input <- "Model inputs: GBD 2023 rates x UN-WPP 2024"   # historical deaths implied by inputs, not simulated
 src_bau   <- "This study: BAU projection"
 yr_model_start <- 2019L                       # first projection year plotted from the model outputs
@@ -76,6 +74,26 @@ int_label <- c(BAU = "Business-as-Usual", HTN = "Improved Hypertension Control",
                Statins = "Improved Statin Uptake", All = "All Interventions")
 int_single <- c("HTN", "Sodium", "TFA", "Statins")
 int_table  <- c("All", int_single)
+
+# ---- Table S8: mortality-trend blocks ------------------------------------------------------------
+# Base case = the production run (output/out_model/, manifest MRM). The three alternatives are the
+# stage-8 deterministic sensitivity analyses (code/8.<n>_sensitivity_*.R): same calibration, runner,
+# inputs and intervention scenarios, each with a fresh stage-6 baseline built with its own trend
+# switches. Their country files are read from output/uncertainty/dsa/out_model_<block>/out_model/
+# (the unchanged stage-7 runner appends out_model/ to its output folder) and their provenance from
+# output/uncertainty/dsa/out_model_<block>/dsa_manifest.rds. The switches below are the expected
+# definitions, checked against each manifest. Every block uses the main results' window W
+# (2026-2050), countries, sexes, ages and causes, with its own BAU as comparator.
+s8_dsa <- data.table(
+  block = c("lc", "no_trends", "ihme_foresight"),
+  label = c("Background and CVD trend LC", "No background and no CVD trend", "IHME Foresight trends"),
+  mortality_trend_method = c("legacy", "coherent", "coherent"),
+  run_bgmx_trend    = c(TRUE, FALSE, TRUE),
+  run_CF_trend      = c(TRUE, FALSE, TRUE),
+  run_CF_trend_80   = c(FALSE, FALSE, FALSE),
+  run_CF_trend_ihme = c(FALSE, FALSE, TRUE))
+s8_dsa[, dir := rp("output", "uncertainty", "dsa", paste0("out_model_", block))]
+s8_int <- c("HTN", "Sodium", "TFA", "Statins", "All")   # row order within each Table S8 block
 
 # ---- Causes (the four modelled CVD causes; there is no pre-aggregated "all" cause in the outputs) ----
 cause_map <- c(ihd = "Ischemic heart disease", istroke = "Ischemic stroke",
@@ -172,8 +190,9 @@ FIG_DONE <- list()
 Every manuscript-specific number, table and figure, in manuscript order. Status values:
 `reproduced` (calculated here from repo inputs/outputs), `fixed_external` (published literature,
 hard-coded with citation), `static_content` (author-written text) and `preserved_pending` (a model
-result that cannot be recalculated yet; legacy value kept and tagged `REPRO_PENDING`). Preserved model
-results (sensitivity runs, Kontis-methods replications, counterfactual runs) come from runs with the legacy
+result that cannot be recalculated yet; legacy value kept and tagged `REPRO_PENDING`). The mortality-trend
+sensitivity results (Table S8) are reproduced from the stage-8 runs (section 19). The remaining preserved model
+results (Kontis-methods replications, counterfactual runs) come from runs with the legacy
 two-pass calibration and the earlier independently forecast (Lee-Carter) mortality trends: they predate the
 single-pass calibration in `code/5. calibration.R` and the coherent trends, and are not consistent with the
 current model outputs until regenerated. Tables that
@@ -263,10 +282,18 @@ pct_statins_reg_name|scalar|Results statins|reproduced|%|1.7|MO:dead; CG:Super_r
 pct_statins_reg_sa|scalar|Results statins|reproduced|%|1.6|MO:dead; CG:Super_region|Statins vs BAU; W; South Asia|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
 pct_statins_reg_cee|scalar|Results statins|reproduced|%|new|MO:dead; CG:Super_region|Statins vs BAU; W; Central Europe, Eastern Europe, and Central Asia|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
 pct_statins_reg_hi|scalar|Results statins|reproduced|%|1.3|MO:dead; CG:Super_region|Statins vs BAU; W; High-income|DD/BAU by region|out-tab-loc (dt_out_region)|artifacts/scalars.rds|
-sens_no_trend_dd_M|scalar|Results: Sensitivity analysis|preserved_pending|million|116|TS8 legacy|no background and no CVD trend; All|legacy Table S8|none in report|artifacts/scalars.rds|alternative-trend runs with the current calibration and code (legacy value from runs with independent LC base-case trends and the legacy calibration)
-sens_lc_dd_M|scalar|Results: Sensitivity analysis|preserved_pending|million|117|TS8 legacy|LC trends; All|legacy Table S8|none in report|artifacts/scalars.rds|alternative-trend runs with the current calibration and code (legacy value from runs with independent LC base-case trends and the legacy calibration)
-sens_foresight_dd_M|scalar|Results: Sensitivity analysis|preserved_pending|million|102|TS8 legacy|Foresight trends; All|legacy Table S8|none in report|artifacts/scalars.rds|alternative-trend runs with the current calibration and code (legacy value from runs with independent LC base-case trends and the legacy calibration)
-sens_pct_range|scalar|Results: Sensitivity analysis|preserved_pending|% range|17%-18%|TS8 legacy|all trend scenarios; All|legacy Table S8|none in report|artifacts/scalars.rds|alternative-trend runs with the current calibration and code (legacy value from runs with independent LC base-case trends and the legacy calibration)
+sens_no_trend_dd_M|scalar|Results: Sensitivity analysis|reproduced|million|116|DSA:dead (no_trends); DSM|no background and no CVD trend; All vs that run's BAU; W; 4 causes; ages 20-95; 190 countries|sum over strata of BAU minus All deaths (Table S8 All row)|tableS8|artifacts/scalars.rds|
+sens_lc_dd_M|scalar|Results: Sensitivity analysis|reproduced|million|117|DSA:dead (lc); DSM|independent LC background and CVD trends, full CF change; All vs that run's BAU; W|as sens_no_trend_dd_M|tableS8|artifacts/scalars.rds|
+sens_foresight_dd_M|scalar|Results: Sensitivity analysis|reproduced|million|102|DSA:dead (ihme_foresight); DSM|GBD 2019 Foresight CF change with coherent background trends; All vs that run's BAU; W|as sens_no_trend_dd_M|tableS8|artifacts/scalars.rds|
+sens_pct_range|scalar|Results: Sensitivity analysis|reproduced|% range|17%-18%|MO:dead; DSA:dead; DSM|All vs each block's own BAU; W; the four Table S8 trend blocks (base case and three alternatives)|lowest to highest DD/BAU of the All row across the four blocks, 1 decimal (value = lowest)|tableS8|artifacts/scalars.rds|
+sens_no_trend_pct|scalar|Results: Sensitivity analysis|reproduced|%|new|DSA:dead (no_trends)|as sens_no_trend_dd_M|DD/BAU (Table S8)|tableS8|artifacts/scalars.rds|
+sens_lc_pct|scalar|Results: Sensitivity analysis|reproduced|%|new|DSA:dead (lc)|as sens_lc_dd_M|DD/BAU (Table S8)|tableS8|artifacts/scalars.rds|
+sens_foresight_pct|scalar|Results: Sensitivity analysis|reproduced|%|new|DSA:dead (ihme_foresight)|as sens_foresight_dd_M|DD/BAU (Table S8)|tableS8|artifacts/scalars.rds|
+sens_no_trend_bau_M|scalar|Results: Sensitivity analysis|reproduced|million|new|DSA:dead (no_trends)|BAU of that run; W; 4 causes|sum of BAU deaths (Table S8)|tableS8|artifacts/scalars.rds|
+sens_lc_bau_M|scalar|Results: Sensitivity analysis|reproduced|million|new|DSA:dead (lc)|BAU of that run; W; 4 causes|sum of BAU deaths (Table S8)|tableS8|artifacts/scalars.rds|
+sens_foresight_bau_M|scalar|Results: Sensitivity analysis|reproduced|million|new|DSA:dead (ihme_foresight)|BAU of that run; W; 4 causes|sum of BAU deaths (Table S8)|tableS8|artifacts/scalars.rds|
+sens_lc_pop_spread_pct|scalar|Supplement: Sensitivity analysis|reproduced|%|new|DSA:pop (lc)|LC run; BAU; W; per country, the four cause models|largest (max - min) / mean of the cause models' adult population summed over W, across countries, 2 decimals|tableS8|artifacts/scalars.rds|
+sens_dd_range_M|scalar|Results: Sensitivity analysis|reproduced|million range|new|MO:dead; DSA:dead; DSM|All vs each block's own BAU; W; the four Table S8 trend blocks|lowest to highest deaths delayed of the All row across the four blocks, 1 decimal (value = lowest)|tableS8|artifacts/scalars.rds|
 htn_2040_vs_2050_gain_M|scalar|Discussion p2|preserved_pending|million|16.5|none|HTN target reached in 2040 vs 2050|difference between two HTN runs|none in report|artifacts/scalars.rds|HTN run with control_target_year = 2050
 tfa_india_ban_word|scalar|Discussion p3|preserved_pending|million (word)|four|none|India TFA ban counterfactual|not in outputs|none in report|artifacts/scalars.rds|TFA run without India's 2021 limit
 sodium_china_current_g|scalar|Discussion p3|reproduced|g/day|7.04|SOD:location,year,sodium_current|China, 2025 baseline|lookup, 2 decimals|out-policy-salt|artifacts/scalars.rds|
@@ -402,7 +429,7 @@ TS4_ModelCompare|table|Table S4|static_content|-|-|MS|-|author-written|-|tables/
 TS5_Premature_Sex|table|Table S5|reproduced|deaths|-|MO:dead,age,sex|5 interventions vs BAU; W; ages 20-69|DD<70 and DD<70 / DD all ages (the note's definition)|ADD: <70 outputs|tables/TS5_Premature_Sex.csv; artifacts/tables_display.rds|
 TS6_Premature_Top30|table|Table S6|reproduced|deaths|-|MO:dead,age,pop|All vs BAU; W; 30 countries with the largest BAU adult population in 2025|DD<70 and DD<70 / DD all ages|ADD: <70 outputs|tables/TS6_Premature_Top30.csv; artifacts/tables_display.rds|
 TS7_ByCountry|table|Table S7|reproduced|deaths|-|MO:dead,location; CG|All vs BAU; W; 190 countries|BAU, projected, DD, DD/25, DD/BAU|out-tab-loc|tables/TS7_ByCountry.csv; artifacts/tables_display.rds|
-TS8_Sensitivity|table|Table S8|mixed|million|-|MO:dead (base rows); MRM; legacy|all rows 2025-2050 (yr_s8_start), the legacy window of the preserved rows; base rows: main scenario (coherent trends)|base rows reproduced (per year = DD / 25 implementation years); alternative-trend rows preserved from legacy runs (independent LC base case, legacy calibration; per year = legacy / 24)|tableS8|tables/TS8_Sensitivity.csv; artifacts/tables_display.rds|alternative-trend runs with the current calibration and code (on 2026-2050)
+TS8_Sensitivity|table|Table S8|reproduced|million|-|MO:dead; MRM; DSA:dead; DSM|four trend blocks (base case = production run; LC, no trends, Foresight CF = stage-8 runs); 5 interventions vs each block's own BAU; W; 4 causes; ages 20-95; 190 countries|BAU, projected = BAU - DD, DD, DD / 25 (2026-2050 inclusive), DD/BAU; combined row = the all_four scenario|tableS8|tables/TS8_Sensitivity.csv; artifacts/tables_display.rds|
 TS9_Assumptions|table|Table S9|static_content|-|-|MS|-|author-written|-|tables/TS9_Assumptions.csv; artifacts/tables_display.rds|
 TS10_Calibration|table|Table S10|reproduced|%|-|CALP|manuscript countries; 2009-2019; deaths and prevalent cases|in-sample WAPE and aggregate bias, uncalibrated vs calibrated joint run, overall and by cause, sex and age band|calibration|tables/TS10_Calibration.csv; artifacts/tables_display.rds|
 TS10_Calibration_Detail|table|Supplement: companion to Table S10 (not displayed)|reproduced|count; %|-|CALP|every calibrated location (manuscript flag); 2009-2019|country x measure x cause x sex totals, WAPE and bias|calibration|tables/TS10_Calibration_Detail.csv|
@@ -439,7 +466,7 @@ check(all(inventory$status %in% c("reproduced", "fixed_external", "static_conten
 
 input_legend <- data.table(
   code = c("MO", "CG", "POP", "UND", "BR", "HBP", "SOD", "TFAS", "TFAD", "STA", "NCD", "FOR", "POW", "ETT", "MC", "LIT", "MS",
-           "CALS", "CALP", "CALF", "CALC", "BL", "TRC", "TRV", "TRD", "MRM", "FORA", "WSP"),
+           "CALS", "CALP", "CALF", "CALC", "BL", "TRC", "TRV", "TRD", "MRM", "FORA", "WSP", "DSA", "DSM"),
   path = c("output/out_model/model_output_part_<Country>.rds", "Country_groupings_extended.csv",
            "data/processed/UN2024/PopulationsSingleAge0050.rds", "data/processed/UN2024/DeathsSingleAge0050.rds",
            "data/processed/adjusted_searo_part<N>.rds (stage-5 calibrated historical rates)", "data/processed/BloodPressure/hbp_control_data.rds",
@@ -460,7 +487,9 @@ input_legend <- data.table(
            "data/processed/tps_mortality_coherent_diagnostics.rds (stage 2: metadata, holdout cells, unreconciled forecasts)",
            "output/out_model/model_run_manifest.rds (master: baseline settings and checks, output files written by the run)",
            "data-raw/GBD/gbd2023_foresight_asr_<cause>20+.csv (GBD 2019 Foresight age-standardised rates, per the file footer)",
-           "WHO World Standard Population 2000-2025 (Ahmad et al. 2001, GPE Discussion Paper 31, Table 4; hard-coded with citation)"),
+           "WHO World Standard Population 2000-2025 (Ahmad et al. 2001, GPE Discussion Paper 31, Table 4; hard-coded with citation)",
+           "output/uncertainty/dsa/out_model_<block>/out_model/model_output_part_<Country>.rds (stage 8: lc, no_trends, ihme_foresight)",
+           "output/uncertainty/dsa/out_model_<block>/dsa_manifest.rds (stage 8: switches, baseline, calibration, input and code md5s, file md5s, validation)"),
   columns = c("scenario, intervention, location, cause, sex, age, year, well, sick, dead, pop, all.mx",
               "iso3, location_wb, Super_region", "location, year_id, age, Nx", "location, year, sex, age, deaths_unwpp",
               "location, year, sex, age, cause, Nx, DIS.mx.t0, BG.mx.all", "location, year, baseline_ctrl, control_scaled",
@@ -478,7 +507,9 @@ input_legend <- data.table(
               "meta, holdout_cells, base_forecast, global_observed, lc, covariance, jumpoff",
               "baseline (trend method, files, checks), files (written_this_run, md5), run_id",
               "Scenario, Location, Sex, Age, Measure, Year, Cause of death or injury, Value",
-              "five-year percentages, 20-24 to 100+"))
+              "five-year percentages, 20-24 to 100+",
+              "as MO",
+              "status, switches, trend_config, calibration_run_id, baseline, runner_md5, input_files, trend_files, code_files, files (md5), validation, invariant"))
 
 knitr::kable(input_legend, caption = "Input codes used in the inventory")
 knitr::kable(inventory[, .N, by = .(type, status)], caption = "Inventory counts by type and status")
@@ -548,11 +579,15 @@ check(yr_impl_start == min(mp$control_start_year, mp$saltyear1, mp$statin_start_
 # Adapted from report chunk `output-data`, which rbinds all files into `data.out`. Here each file is
 # checked, deaths delayed are computed within matching strata (intervention vs BAU on cause, sex, single
 # age and year) and only compact aggregates are kept. Population and all.mx repeat across the four cause
-# models, so one copy (ihd) is used for them.
+# models, so one copy (ihd) is used for them. The same function reads the stage-8 sensitivity outputs
+# (section 19) with acc = FALSE, so every Table S8 block gets identical treatment. shared_pop = FALSE is
+# used only for runs whose trends break BG.mx = ALL.mx - DIS.mx.t0 (the independent LC block): the runner
+# seeds each cause model's age-20 entrants with Nx * (DIS.mx.t0 + BG.mx), so their populations then drift
+# apart slightly; that drift is measured (pop_spread, allmx_spread) and bounded in section 19 instead.
 mo_cols <- c("scenario", "age", "cause", "sex", "year", "well", "sick", "newcases", "dead", "pop",
              "all.mx", "intervention", "location")
 n_ages  <- length(20:95)
-read_model_file <- function(f) {
+read_model_file <- function(f, acc = TRUE, shared_pop = TRUE) {
   x <- readRDS(f); setDT(x)
   loc <- sub("^model_output_part_(.+)\\.rds$", "\\1", basename(f))
   need_cols(x, mo_cols, basename(f))
@@ -578,7 +613,9 @@ read_model_file <- function(f) {
   check(all(x$dead >= 0), paste(loc, ": negative deaths"))
   rep_dev <- x[, .(d = max(abs(pop - pop[1])) / max(pop[1], 1) + max(abs(all.mx - all.mx[1])) / max(all.mx[1], 1e-9)),
                by = .(int, sex, age, year)][, max(d)]
-  check(rep_dev < 1e-8, paste(loc, ": pop or all.mx differ across cause models"))
+  if (shared_pop) check(rep_dev < 1e-8, paste(loc, ": pop or all.mx differ across cause models"))
+  # population-level spread across the four cause models: BAU adult population and all-cause deaths over W
+  sp <- x[int == "BAU" & year %in% win_cum, .(pop = sum(pop), allmx = sum(all.mx)), by = cause]
   y <- merge(x[int != "BAU", .(int, cause, sex, age, year, dead)], bau, by = c("cause", "sex", "age", "year"))
   y[, dd := bau - dead]
   miss <- rbindlist(lapply(setdiff(int_raw, "BAU"), function(i)
@@ -587,15 +624,18 @@ read_model_file <- function(f) {
   bau[, age_group := age_group_of(age)]
   # Single-age sums over countries for the age-standardised rates (Figures S3, S4a), accumulated file by file
   # (one population and all-cause copy: the ihd rows). Dropped non-finite rows (above) are left out.
-  acc_add("SA", x[, .(dead = sum(dead)), keyby = .(int, cause, sex, age, year)], "dead")
-  acc_add("SP", x[cause == "ihd", .(pop = sum(pop), all_mx = sum(all.mx)), keyby = .(int, sex, age, year)], c("pop", "all_mx"))
+  if (acc) {
+    acc_add("SA", x[, .(dead = sum(dead)), keyby = .(int, cause, sex, age, year)], "dead")
+    acc_add("SP", x[cause == "ihd", .(pop = sum(pop), all_mx = sum(all.mx)), keyby = .(int, sex, age, year)], c("pop", "all_mx"))
+  }
   list(
     B   = bau[, .(bau = sum(bau)), by = .(cause, sex, age_group, year)][, location := loc],
     D   = y[, .(dd = sum(dd)), by = .(int, cause, sex, age_group, year)][, location := loc],
     PJ  = merge(x[int != "BAU" & year %in% win_cum, .(proj_direct = sum(dead)), by = int], miss, by = "int")[, location := loc],
     AC  = x[int == "BAU" & cause == "ihd", .(all_mx = sum(all.mx), pop = sum(pop)), by = .(sex, year)][, location := loc],
     LOG = data.table(location = loc, rows = n_rows, dropped_rows = n_bad, dropped_in = bad_int, duplicated_strata = 0L,
-                     cause_copy_deviation = rep_dev, strata_without_effect = sum(miss$n),
+                     cause_copy_deviation = rep_dev, pop_spread = sp[, (max(pop) - min(pop)) / mean(pop)],
+                     allmx_spread = sp[, (max(allmx) - min(allmx)) / mean(allmx)], strata_without_effect = sum(miss$n),
                      dd_before_start = y[year < yr_impl_start, sum(abs(dd))], min_dd = min(y$dd)))
 }
 # Running sums keyed by stratum: ACC[[name]] holds the sum over the files read so far.
@@ -742,8 +782,10 @@ knitr::kable(input_log, caption = "Model-output checks")
 # ---- Core summary used by every section: BAU and deaths delayed (DD) summed over strata ----
 # DD = BAU - intervention, computed within matching strata in read_model_file(). The combined effect is
 # the simulated "All" scenario, never a sum of the separate effects.
-summ <- function(by = character(0), years = win_cum, ints = int_table, where = NULL) {
-  bb <- B[year %in% years]; dd <- D[year %in% years & int %in% ints]
+# BB, DD: the BAU and deaths-delayed aggregates of one model run (default: the main run; section 19
+# passes those of each stage-8 sensitivity run).
+summ <- function(by = character(0), years = win_cum, ints = int_table, where = NULL, BB = B, DD = D) {
+  bb <- BB[year %in% years]; dd <- DD[year %in% years & int %in% ints]
   if (!is.null(where)) { bb <- bb[eval(where)]; dd <- dd[eval(where)] }
   if (length(by)) {
     out <- merge(dd[, .(dd = sum(dd)), by = c("int", by)], bb[, .(bau = sum(bau)), by = by], by = by, all.x = TRUE)
@@ -1462,42 +1504,136 @@ add_table("TS7_ByCountry", ts7_csv, ts7_disp, "reproduced",
 
 # 19. Table S8 and the Sensitivity analysis paragraph
 
+Four mortality-trend blocks (setup chunk, `s8_dsa`), each summed over W for the five reported
+interventions against its own BAU, from unrounded values: deaths delayed = BAU − intervention deaths,
+% = deaths delayed / BAU, per year = deaths delayed / `r length(win_cum)` (the inclusive window). Base case:
+the main results above (production run, `MRM`). Alternatives: the stage-8 runs, read with the same reader
+(`read_model_file`) and summary (`summ`) as the main results after their provenance is checked against the
+base case. The combined row is the simulated `all_four` scenario, never a sum of single effects.
+
 ```{r tableS8}
-# REPRO_PENDING [Table S8 + Sensitivity analysis paragraph]: alternative-trend rows from the legacy workbook
-# TS8_Sensitivity!A3:G23. Those runs (LC trends, no trends, IHME Foresight trends) used the legacy two-pass
-# calibration and an independent-LC base case; they are not in the repo and are not comparable with the
-# refreshed base case. The legacy base rows ("Background and CVD trend*80%", independent LC) are replaced by
-# the current main scenario (coherent trends, model run in MRM), regenerated from the outputs on the legacy
-# 2025-2050 window (yr_s8_start), the window of the preserved rows, so they differ from Table 2 (2026-2050)
-# in projected, baseline and %. Base-row "per year" = DD / 25 implementation years (deaths delayed are zero
-# in 2025); the legacy rows divide by 24. Move the whole table to 2026-2050 once the alternative runs exist.
-ts8_leg <- data.table(
-  trend = rep(c("Background and CVD trend*80%", "Background and CVD trend LC", "No background and no CVD trend", "IHME Foresight trends"), each = 5),
-  int = rep(c("HTN", "Sodium", "TFA", "Statins", "All"), 4),
-  proj = c(621.8, 659.9, 691.7, 685.3, 578.1, 621.1, 659.3, 690.9, 684.4, 577.7, 610.7, 647.4, 679, 672.7, 567.5, 498.6, 532.3, 561.1, 556.2, 462.3),
-  bau  = rep(c(696.2, 695.4, 683.4, 564.6), each = 5),
-  dd   = c(74.4, 36.3, 4.5, 10.9, 118.1, 74.3, 36.1, 4.5, 10.9, 117.7, 72.8, 36, 4.4, 10.7, 115.9, 66, 32.3, 3.6, 8.4, 102.3),
-  per_year = c(3.1, 1.5, 0.2, 0.5, 4.9, 3.1, 1.5, 0.2, 0.5, 4.9, 3, 1.5, 0.2, 0.4, 4.8, 2.7, 1.3, 0.1, 0.4, 4.3),
-  pct  = c(0.107, 0.052, 0.006, 0.016, 0.17, 0.107, 0.052, 0.006, 0.016, 0.169, 0.106, 0.053, 0.006, 0.016, 0.17, 0.117, 0.057, 0.006, 0.015, 0.181))
-ts8 <- copy(ts8_leg)
-base <- ts8$trend == "Background and CVD trend*80%"
-check(identical(MRM$baseline$trend_method, "coherent"), "Table S8: base rows must come from the coherent-trend run")
-ts8[base, trend := sprintf("Coherent trends; CF %d%% of the cause trend (base case)", round(100 * MRM$baseline$cf_share))]
-ts8[!base, trend := paste0(trend, " (legacy run)")]
-s_int_s8 <- summ(years = yr_s8_start:yr_end)
-ts8[base, c("proj", "bau", "dd", "pct", "per_year") := s_int_s8[match(ts8$int[base], int), .(proj / 1e6, bau / 1e6, dd / 1e6, pct, dd / 1e6 / n_impl_years)]]
-ts8_csv <- ts8[, .(`Mortality Trend Modeling` = trend, Intervention = int_label[int], `Projected Deaths (M)` = proj,
-                   `Baseline Deaths (M)` = bau, `Deaths Delayed (M)` = dd, `Deaths Delayed per Year (M)` = per_year, `Deaths Delayed (%)` = pct)]
-ts8_status <- matrix("preserved_pending", nrow(ts8_csv), ncol(ts8_csv))
-ts8_status[, 1:2] <- "static_content"
-ts8_status[base, 3:7] <- "reproduced"
+check(identical(MRM$baseline$trend_method, "coherent"), "Table S8: the base case must be the coherent-trend run")
+s8_sum <- list(base = summ()); s8_man <- list(); s8_files <- list(); s8_log <- list()
+md5_now <- function(t) identical(unname(tools::md5sum(file.path(root, t$file))), t$md5)
+for (i in seq_len(nrow(s8_dsa))) {
+  d <- s8_dsa[i]; b <- d$block
+  mf <- file.path(d$dir, "dsa_manifest.rds")
+  check(file.exists(mf), sprintf("Table S8: no stage-8 output for '%s' (%s is missing); run: Rscript \"code/0. master.R\" 8 \"--dsa=%s\"", b, mf, b))
+  M <- readRDS(mf)
+  check(identical(M$analysis, b) && identical(M$status, "complete") && !isTRUE(M$pilot) && all(M$validation$checks$passed),
+        sprintf("Table S8: stage-8 run '%s' is not a complete, validated run (status: %s)", b, M$status))
+  sw_names <- c("mortality_trend_method", "run_bgmx_trend", "run_CF_trend", "run_CF_trend_80", "run_CF_trend_ihme")
+  sw <- setNames(lapply(sw_names, function(v) d[[v]]), sw_names)
+  check(identical(M$switches[names(sw)], sw), sprintf("Table S8: '%s' ran with switches that differ from its Table S8 definition", b))
+  check(identical(M$trend_config$method, d$mortality_trend_method) && identical(M$trend_config$cf_share, if (d$run_CF_trend_80) 0.8 else 1) &&
+          identical(M$baseline$trend_method, d$mortality_trend_method) && identical(M$baseline$cf_share, M$trend_config$cf_share),
+        sprintf("Table S8: trend_config or the stage-6 baseline of '%s' is not synchronised with its switches", b))
+  # Same calibration, runner, base-case run, inputs, countries and window as the main results
+  check(identical(M$calibration_run_id, CALS$run_id) && identical(M$baseline$calibration_run_id, CALS$run_id),
+        sprintf("Table S8: '%s' used calibration %s, not %s", b, M$calibration_run_id, CALS$run_id))
+  check(identical(M$runner_md5, MRM$runner_md5), sprintf("Table S8: '%s' used a different stage-7 runner from the base case", b))
+  check(identical(M$production$run_id, MRM$run_id) && isTRUE(M$production$same_runner) && length(M$production$inputs_newer) == 0,
+        sprintf("Table S8: '%s' was not run against the base-case run %s with unchanged inputs", b, MRM$run_id))
+  check(md5_now(M$input_files) && md5_now(M$trend_files), sprintf("Table S8: inputs or trend files changed after stage-8 run '%s'", b))
+  check(identical(as.integer(M$reporting_window), win_cum), sprintf("Table S8: '%s' records a different reporting window", b))
+  check(setequal(M$expected_countries, locs), sprintf("Table S8: '%s' covers different countries from the main results", b))
+  f <- sort(list.files(file.path(d$dir, "out_model"), pattern = "^model_output_part_.+\\.rds$", full.names = TRUE))
+  check(setequal(basename(f), M$files$file) && all(M$files$written_this_run) &&
+          identical(unname(tools::md5sum(f)), M$files[match(basename(f), file), md5]),
+        sprintf("Table S8: country files of '%s' differ from those its run wrote", b))
+  # Same reader and summary as the main results. The coherent blocks keep the strict shared-population check;
+  # the independent LC block (accounting not maintained, see read_model_file) gets a bounded one below.
+  shared <- d$mortality_trend_method == "coherent"
+  r  <- lapply(f, read_model_file, acc = FALSE, shared_pop = shared)
+  lg <- rbindlist(lapply(r, `[[`, "LOG"))
+  check(shared || (max(lg$pop_spread) < 1e-3 && max(lg$allmx_spread) < 1e-2),
+        sprintf("Table S8: in '%s' the cause models' populations differ by more than 0.1%% (or deaths by more than 1%%)", b))
+  BB <- rbindlist(lapply(r, `[[`, "B"))[location %in% locs]
+  DD <- rbindlist(lapply(r, `[[`, "D"))[location %in% locs]
+  PP <- rbindlist(lapply(r, `[[`, "PJ"))[location %in% locs]
+  check(setequal(unique(BB$location), locs) && nrow(DD[!BB, on = .(location, cause, sex, age_group, year)]) == 0,
+        sprintf("Table S8: '%s' deaths-delayed strata without a BAU match, or countries missing", b))
+  check(DD[year < yr_impl_start, sum(abs(dd))] < 1e-6 && all(is.finite(BB$bau)) && all(is.finite(DD$dd)),
+        sprintf("Table S8: '%s' has deaths delayed before %d or non-finite aggregates", b, yr_impl_start))
+  s <- summ(BB = BB, DD = DD)
+  pj <- merge(PP[, .(proj_direct = sum(proj_direct), bau_missing = sum(bau_missing)), by = int], s[, .(int, proj)], by = "int")
+  check(nrow(pj) == length(int_table) && pj[, max(abs(proj_direct + bau_missing - proj) / proj)] < 1e-9,
+        sprintf("Table S8: projected deaths of '%s' do not reconcile with BAU - deaths delayed", b))
+  s8_sum[[b]] <- s; s8_man[[b]] <- M; s8_files[[b]] <- f; s8_log[[b]] <- lg
+  rm(r, BB, DD, PP, lg); invisible(gc())
+}
+# Inputs that no trend switch touches (populations, prevalence, historical rates, BP and coverage data)
+# are identical across the stage-8 runs; IR is never trended (only lowered by the probability guard).
+s8_inv <- rbindlist(lapply(s8_man, function(M) as.data.table(M$invariant[c("nontrend_columns", "historical_rows", "data_in", "inc",
+                                                                           "ir_projection_raised")])), idcol = "block")
+check(all(vapply(s8_inv[, !c("block")], uniqueN, 1L) == 1L) && all(s8_inv$ir_projection_raised == 0),
+      "Table S8: the stage-8 runs differ in inputs that no trend switch touches")
+# The Foresight CF alternative uses the same GBD 2019 Foresight files as Figure S4
+fs <- s8_man$ihme_foresight$foresight
+check(identical(fs$release, "Global Burden of Disease (GBD) Study 2019") &&
+        setequal(fs$files$md5, unname(tools::md5sum(in_files$FORA))), "Table S8: the Foresight CF run used other Foresight files or release")
+
+s8_lab <- c(base = sprintf("Coherent trends; CF %d%% of the cause trend (base case)", round(100 * MRM$baseline$cf_share)),
+            setNames(s8_dsa$label, s8_dsa$block))
+s8 <- rbindlist(s8_sum, idcol = "block")
+ts8 <- s8[CJ(block = names(s8_lab), int = s8_int, sorted = FALSE), on = .(block, int)]
+check(nrow(ts8) == length(s8_lab) * length(s8_int) && !anyNA(ts8$dd), "Table S8: rows missing")
+# Base block = the main results to full precision; one BAU per block; row identities on unrounded values
+check(isTRUE(all.equal(ts8[block == "base"][order(int), .(int, bau, dd, proj, pct, per_year)],
+                       s_int[order(int), .(int, bau, dd, proj, pct, per_year)], tolerance = 0, check.attributes = FALSE)),
+      "Table S8: base rows differ from the main results")
+check(ts8[, uniqueN(bau), by = block][, all(V1 == 1L)], "Table S8: more than one BAU in a block")
+check(n_impl_years == length(win_cum) && ts8[, max(abs(bau - dd - proj) / bau)] < 1e-12 &&
+        ts8[, max(abs(pct - dd / bau))] < 1e-12 && ts8[, max(abs(per_year - dd / length(win_cum)) / pmax(abs(dd), 1))] < 1e-12,
+      "Table S8: a row breaks DD = BAU - projected, % = DD / BAU or per year = DD / 25")
+
+ts8_csv <- ts8[, .(`Mortality Trend Modeling` = s8_lab[block], Intervention = int_label[int], `Projected Deaths (M)` = proj / 1e6,
+                   `Baseline Deaths (M)` = bau / 1e6, `Deaths Delayed (M)` = dd / 1e6, `Deaths Delayed per Year (M)` = per_year / 1e6,
+                   `Deaths Delayed (%)` = pct)]
 ts8_disp <- data.frame("Mortality Trend Modeling" = esc_md(blank_repeats(ts8_csv[[1]])), Intervention = ts8_csv$Intervention,
                        "Projected Deaths" = fmt_num(ts8_csv[[3]], 1), "Baseline Deaths" = ifelse(duplicated(ts8_csv[[1]]), "", fmt_num(ts8_csv[[4]], 1)),
                        "Deaths Delayed" = fmt_num(ts8_csv[[5]], 1), "Deaths Delayed per Year" = fmt_num(ts8_csv[[6]], 1),
                        "Deaths Delayed (%)" = fmt_num(100 * ts8_csv[[7]], 1), check.names = FALSE)
-add_table("TS8_Sensitivity", ts8_csv, ts8_disp, ts8_status,
+add_table("TS8_Sensitivity", ts8_csv, ts8_disp, "reproduced",
           numfmt = c(`Projected Deaths (M)` = "0.0", `Baseline Deaths (M)` = "0.0", `Deaths Delayed (M)` = "0.0",
                      `Deaths Delayed per Year (M)` = "0.0", `Deaths Delayed (%)` = "0.0%"))
+
+# Sensitivity scalars (Results text): the All rows of Table S8
+s8_all <- function(b, col) g(ts8, col, block = b, int = "All")
+sens_key <- c(no_trend = "no_trends", lc = "lc", foresight = "ihme_foresight")
+for (k in names(sens_key)) {
+  scM(sprintf("sens_%s_dd_M", k), s8_all(sens_key[[k]], "dd"), 1)
+  scP(sprintf("sens_%s_pct", k), s8_all(sens_key[[k]], "pct"), 1)
+  scM(sprintf("sens_%s_bau_M", k), s8_all(sens_key[[k]], "bau"), 1)
+}
+s8_alls <- ts8[int == "All"]
+set_sc("sens_pct_range", 100 * min(s8_alls$pct),
+       sprintf("%s%%–%s%%", fmt_num(100 * min(s8_alls$pct), 1), fmt_num(100 * max(s8_alls$pct), 1)),
+       note = paste(sprintf("%s %.3f%%", s8_alls$block, 100 * s8_alls$pct), collapse = "; "))
+set_sc("sens_dd_range_M", min(s8_alls$dd) / 1e6,
+       sprintf("%s–%s", fmt_num(min(s8_alls$dd) / 1e6, 1), fmt_num(max(s8_alls$dd) / 1e6, 1)),
+       note = paste(sprintf("%s %.3fM", s8_alls$block, s8_alls$dd / 1e6), collapse = "; "))
+# Claims in the Results sensitivity paragraph: across the four blocks the combined deaths delayed rank with the
+# BAU deaths, and the relative reduction varies by less than one percentage point ("varied little").
+check(identical(order(s8_alls$bau), order(s8_alls$dd)),
+      "Results sensitivity text: deaths delayed no longer rank with BAU deaths across the trend blocks; revise the text")
+check(diff(range(s8_alls$pct)) < 0.01,
+      "Results sensitivity text: relative reductions now differ by 1 percentage point or more; revise 'varied little'")
+
+s8_prov <- rbindlist(lapply(names(s8_man), function(b) {
+  M <- s8_man[[b]]
+  data.table(block = b, run_id = M$run_id, completed = M$completed, method = M$switches$mortality_trend_method,
+             cf_share = M$trend_config$cf_share, cf_source = M$baseline$cf_source, baseline_id = M$baseline$baseline_id,
+             calibration = M$calibration_run_id, files = nrow(M$files), nonfinite_rows = sum(M$validation$file_log$nonfinite_rows),
+             accounting_breaks_before_guard = M$baseline$accounting_before_guard$n_total_gap, stage7_min = round(M$stage7_minutes, 1),
+             max_pop_spread_pct = signif(100 * max(s8_log[[b]]$pop_spread), 3), max_allmx_spread_pct = signif(100 * max(s8_log[[b]]$allmx_spread), 3))
+}))
+set_sc("sens_lc_pop_spread_pct", 100 * max(s8_log$lc$pop_spread), formatC(100 * max(s8_log$lc$pop_spread), format = "f", digits = 2),
+       note = sprintf("country with the largest spread: %s; all-cause deaths spread max %.3f%%", s8_log$lc[which.max(pop_spread), location],
+                      100 * max(s8_log$lc$allmx_spread)))
+knitr::kable(s8_prov, caption = "Stage-8 sensitivity runs read for Table S8 (provenance checked above)")
+knitr::kable(ts8[, .(block, int, bau_M = round(bau / 1e6, 2), dd_M = round(dd / 1e6, 2), pct = round(100 * pct, 2))],
+             caption = sprintf("Table S8 values, %d-%d (unrounded values are in the CSV)", min(win_cum), max(win_cum)))
 ```
 
 # 20. Table S9 and the math-supplement tables (static) with a check against the model code
@@ -2104,7 +2240,13 @@ mo_md5 <- md5(mo_files)
 tf <- tempfile(); writeLines(paste(basename(mo_files), mo_md5), tf)
 inputs_md5 <- rbind(
   data.table(file = "output/out_model/model_output_part_*.rds", n = length(mo_files), md5 = md5(tf)),
-  rbindlist(lapply(setdiff(names(in_files), "MO"), function(k) data.table(file = sub(paste0(root, "/"), "", in_files[[k]], fixed = TRUE), n = 1L, md5 = md5(in_files[[k]])))))
+  rbindlist(lapply(setdiff(names(in_files), "MO"), function(k) data.table(file = sub(paste0(root, "/"), "", in_files[[k]], fixed = TRUE), n = 1L, md5 = md5(in_files[[k]])))),
+  # stage-8 sensitivity runs (Table S8): country files (md5 of the name + md5 list) and manifests
+  rbindlist(lapply(names(s8_files), function(b) {
+    tfb <- tempfile(); writeLines(paste(basename(s8_files[[b]]), md5(s8_files[[b]])), tfb)
+    data.table(file = sprintf(c("output/uncertainty/dsa/out_model_%s/out_model/model_output_part_*.rds", "output/uncertainty/dsa/out_model_%s/dsa_manifest.rds"), b),
+               n = c(length(s8_files[[b]]), 1L), md5 = c(md5(tfb), md5(file.path(s8_dsa[block == b, dir], "dsa_manifest.rds"))))
+  })))
 provenance <- list(
   inventory = inventory, input_legend = input_legend, inputs_md5 = inputs_md5, model_log = mo_log,
   settings = list(yr_impl_start = yr_impl_start, yr_cum_start = yr_cum_start, yr_end = yr_end, n_impl_years = n_impl_years,
@@ -2119,6 +2261,12 @@ provenance <- list(
                                                      single_age_weights = who_std)),
   model_run = list(run_id = MRM$run_id, started = MRM$started, completed = MRM$completed, baseline = MRM$baseline,
                    runner_md5 = MRM$runner_md5, master_md5 = MRM$master_md5),
+  sensitivity = list(window = win_cum, blocks = s8_dsa, labels = s8_lab, runs = s8_prov, model_log = s8_log,
+                     manifests = lapply(s8_man, function(M) M[c("run_id", "started", "stage7_started", "completed", "switches", "trend_config",
+                                                                "calibration_run_id", "runner_md5", "master_md5", "production", "input_files",
+                                                                "trend_files", "code_files", "foresight", "invariant", "expected_countries",
+                                                                "scenarios", "reporting_window", "workers", "stage7_minutes", "validation", "session")]),
+                     baselines = lapply(s8_man, function(M) M$baseline)),
   parameter_check = param_chk,
   session = list(R = R.version.string, packages = vapply(req_pkgs, function(p) as.character(packageVersion(p)), "")))
 save_rds(provenance, "provenance.rds")
@@ -2160,7 +2308,10 @@ wb_meta <- data.table(
     "Deaths delayed are calculated as the difference in cumulative deaths between the business-as-usual scenario and each intervention scenario. Deaths delayed (<70 years %) indicate the proportion of all deaths delayed under the corresponding intervention and sex that occur before age 70 years, not the share of baseline deaths.",
     "% deaths delayed <70 represents the proportion of all deaths delayed in each country that occur before age 70 years, serving as an indicator of the share of benefits attributable to premature mortality reduction.",
     "Region column added in this workbook for tracking (from Table S1); it is not displayed in the manuscript table.",
-    "Projected deaths delayed are shown under alternative assumptions for secular background and cardiovascular mortality trends, for individual interventions and their combined effect, summed over 2025-2050 (deaths delayed are zero in 2025). Base-case rows: the current model run with coherent (reconciled) mortality trends. Rows marked legacy run: earlier runs with independently forecast Lee-Carter trends and the earlier two-pass calibration, kept for reference; they are not comparable with the base case. Per year: base case = deaths delayed / 25 implementation years; legacy rows divided by 24.",
+    sprintf(paste("Deaths and deaths delayed summed over %d-%d (%d years) under four assumptions for secular background and cardiovascular mortality trends, for each intervention and the four combined (simulated jointly, not summed). Every block uses the current calibration (run %s), model code, inputs, countries, sexes, ages 20-95+ and the four CVD causes, and compares its interventions with its own business-as-usual run: deaths delayed = BAU - intervention deaths; %% = deaths delayed / BAU; per year = deaths delayed / %d.",
+                  "Base case: coherent (reconciled) trends, case fatality changed by %d%% of the projected cumulative change in the cause's death rate (model run %s). LC: independently forecast Lee-Carter trends scale background mortality, and case fatality changes by the full forecast change in the cause's death rate. No trend: 2019 death rates and case fatality held constant (population change and 2020-2021 COVID-19 excess mortality still apply). IHME Foresight: coherent background trends as in the base case, with case fatality changed by the full change in the GBD 2019 Foresight reference-scenario global age-standardized death rate of each cause. Stage-8 runs: %s."),
+            min(win_cum), max(win_cum), length(win_cum), CALS$run_id, length(win_cum), round(100 * MRM$baseline$cf_share), MRM$run_id,
+            paste(sprintf("%s %s", s8_prov$block, s8_prov$run_id), collapse = "; ")),
     "We used discrete-time Markov models stratified by single-year age (20–95+), sex, and calendar year (2019–2050). Interventions were assumed to be independent except for sodium reduction, which was linked to blood pressure and its downstream effects. Combined effects were applied multiplicatively to avoid double-counting and provide conservative estimates of joint impact.",
     sprintf("In-sample fit, not external or temporal validation. Targets: %s %s counts of deaths and prevalent cases, %s, %d countries, both sexes, four causes, %d age bands. Uncalibrated = stage-2 rates under the same probability bounds; calibrated = all selected multipliers applied together (joint run). WAPE = sum|predicted - observed| / sum observed; bias = sum predicted / sum observed - 1 (undefined when the observed total is 0). Cells per measure = country x sex x cause x age band x year cells; Countries = countries in the row. Rows: all, by cause, by sex and by age band. Calibration run %s.",
             cfgc$target_source, cfgc$target_metric, yrs_txt(fit_years), length(locs), length(cfgc$age_band_labels), CALS$run_id),
@@ -2331,7 +2482,27 @@ chk <- list(
   "trends: holdout cells per sex and series = ages x scoring years" = all(TRV$n == mf_n_cells),
   "trends: Global identity ALL = four causes + other within tolerance" = max(mf_idn) <= mf_meta$rel_tol,
   "trends: coherent country accounting held before the guard in the model run" =
-    with(MRM$baseline$accounting_before_guard, n_all_spread + n_other_spread + n_total_gap + n_bg_gap) == 0)
+    with(MRM$baseline$accounting_before_guard, n_all_spread + n_other_spread + n_total_gap + n_bg_gap) == 0,
+  "Table S8: base rows equal the Table 2 all-CVD rows (2026-2050)" = local({
+    ts8c <- TB$TS8_Sensitivity$csv[seq_along(s8_int)]; t2a <- t2c[Cause == "All CVDs"][match(ts8c$Intervention, Intervention)]
+    max(abs(ts8c$`Projected Deaths (M)` - t2a$`Projected Deaths, Intervention (M)`), abs(ts8c$`Baseline Deaths (M)` - t2a$`Projected Deaths, Business as Usual (M)`),
+        abs(ts8c$`Deaths Delayed (M)` - t2a$`Deaths Delayed (M)`), abs(ts8c$`Deaths Delayed per Year (M)` - t2a$`Deaths Delayed per Year (M)`),
+        abs(ts8c$`Deaths Delayed (%)` - t2a$`Deaths Delayed (%)`)) < 1e-12 }),
+  "Table S8: every row has DD = BAU - projected, % = DD / BAU and per year = DD / 25" = local({
+    x <- TB$TS8_Sensitivity$csv
+    max(abs(x$`Baseline Deaths (M)` - x$`Projected Deaths (M)` - x$`Deaths Delayed (M)`)) < 1e-9 &&
+      max(abs(x$`Deaths Delayed (%)` - x$`Deaths Delayed (M)` / x$`Baseline Deaths (M)`)) < 1e-12 &&
+      max(abs(x$`Deaths Delayed per Year (M)` - x$`Deaths Delayed (M)` / length(2026:2050))) < 1e-12 }),
+  "Table S8: each trend block has one BAU, from its own run" =
+    TB$TS8_Sensitivity$csv[, uniqueN(`Baseline Deaths (M)`), by = `Mortality Trend Modeling`][, all(V1 == 1L)] &&
+    uniqueN(TB$TS8_Sensitivity$csv$`Baseline Deaths (M)`) == length(s8_lab),
+  "Table S8: sensitivity runs complete, validated, same calibration, runner, inputs and countries (section 19)" =
+    length(s8_man) == nrow(s8_dsa) && all(vapply(s8_man, function(M) identical(M$status, "complete") && identical(M$calibration_run_id, CALS$run_id) &&
+                                                   identical(M$runner_md5, MRM$runner_md5) && setequal(M$expected_countries, locs), logical(1))),
+  "Table S8: sensitivity scalars equal the All rows" =
+    all(abs(c(SC$sens_no_trend_dd_M$value, SC$sens_lc_dd_M$value, SC$sens_foresight_dd_M$value) -
+              ts8[int == "All"][match(c("no_trends", "lc", "ihme_foresight"), block), dd / 1e6]) < 1e-12) &&
+    abs(SC$sens_pct_range$value - 100 * min(ts8[int == "All", pct])) < 1e-12)
 integrity <- data.table(check = names(chk), passed = unlist(chk))
 knitr::kable(integrity, caption = "Integrity checks")
 check(all(integrity$passed), paste("integrity checks failed:", paste(integrity[!(passed), check], collapse = "; ")))
@@ -2358,7 +2529,11 @@ explain <- c(
   `TS5_Premature_Sex: Deaths Delayed (#)` = "Antigua and Barbuda BP-only rows with non-finite states are given no effect here; legacy treated their deaths as 0 (differences of tens of deaths)",
   `T2_DeathsDelayed: Deaths Delayed per Year` = "legacy cause rows divide by 24 (report deaths_summary() hard-codes /24); the all-CVD rows and the text divide by 25",
   `TS7_ByCountry: % Delayed (legacy stored at 2 decimals)` = "BAU now summed over 2026-2050 (legacy 2025-2050); the legacy % was also rounded to 2 decimals before display",
-  `T1_Scenarios: Baseline level (2025)` = "2025 baseline (the note's estimand) is 4.150 g/day, just below the rounding boundary; the report's 2019 value (4.151) gave 4.2")
+  `T1_Scenarios: Baseline level (2025)` = "2025 baseline (the note's estimand) is 4.150 g/day, just below the rounding boundary; the report's 2019 value (4.151) gave 4.2",
+  sens_no_trend_dd_M = "legacy runs used the two-pass calibration, an independent-LC base case and 2025-2050; now the stage-8 run on the current model, 2026-2050",
+  sens_lc_dd_M = "as sens_no_trend_dd_M; the legacy text also rounded 117.7 down to 117",
+  sens_foresight_dd_M = "as sens_no_trend_dd_M",
+  sens_pct_range = "legacy range covered the legacy rows; now the All rows of the four current Table S8 blocks, base case included")
 # calibration scalars (legacy = "new") did not exist in the legacy manuscript and are not compared
 sc_cmp <- scalars[status == "reproduced" & legacy != "new", .(item = key, legacy, reproduced = display)][legacy != reproduced]
 leg_t2 <- data.table(

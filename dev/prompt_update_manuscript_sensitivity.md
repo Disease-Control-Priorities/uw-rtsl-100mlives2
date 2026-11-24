@@ -16,6 +16,7 @@ Files authorized for creation:
 
 Existing files authorized for modification:
 
+- `.gitignore` at the repository root.
 - `code/0. master.R` (the master script referred to as `code/0.master.R` in my request; use the actual repository filename).
 - `manuscript/manuscript-100mlives2.Rmd`.
 - `reports/manuscript-100mlives2-artifacts.Rmd`.
@@ -91,6 +92,29 @@ output/uncertainty/dsa/
 
 Keep each analysis's country outputs, logs, manifests, and any newly generated intermediates within its own folder. Preserve the stage-7 country-output schema and established naming conventions so the same aggregation logic works across scenarios. If the unchanged runner necessarily appends an `out_model/` child, retaining that child beneath the named analysis folder is acceptable; document the exact paths and make the artifact reader use them explicitly.
 
+### Exclude DSA outputs from Git
+
+Update the root `.gitignore` so the entire `output/uncertainty/dsa/` directory and all of its contents are ignored. Add this repository-root-anchored rule **after** any broader uncertainty rules and negation patterns:
+
+```gitignore
+# Deterministic sensitivity analysis outputs
+/output/uncertainty/dsa/
+```
+
+The attached `.gitignore` currently has these broader rules:
+
+```gitignore
+output/uncertainty/**/*
+!output/uncertainty/**/
+!output/uncertainty/**/*.md
+```
+
+Keep their behavior outside `dsa/`. The explicit DSA rule must come afterward so DSA outputs, including any generated Markdown files, remain ignored despite those exceptions. Ensure the preceding line ends with a newline; do not accidentally concatenate the new rule with the existing final pattern. Preserve all unrelated ignore rules and avoid duplicate entries.
+
+Check for already tracked DSA files with `git ls-files -- output/uncertainty/dsa/`. Ignore rules do not stop tracking files already in the index. If any are present, remove only those DSA paths from the index with a narrowly scoped `git rm --cached` command, preserving their working-tree copies and unrelated staged changes. This index cleanup is authorized as part of excluding DSA outputs; report which files were untracked. Do not delete local results, untrack the entire `output/uncertainty/` tree, commit, or push.
+
+Validate the final rules with `git check-ignore --no-index -v` on representative nested `.rds`, `.csv`, log, and `.md` paths beneath `output/uncertainty/dsa/`. Confirm that `git ls-files -- output/uncertainty/dsa/` is empty after any necessary index cleanup and that `git status` does not propose new DSA output files for tracking. Keep the new sensitivity source scripts tracked normally.
+
 Existing calibrated inputs and forecasts may be read in place. If required forecast inputs are missing, identify them first. Generate them only if the current scripts can safely write to a DSA-specific directory without altering production inputs or diagnostics; otherwise report the blocker and request any additional file changes needed. Do not silently fall back to another trend source.
 
 Protect all main outputs, including `output/out_model/`, the main manifest, calibration files, processed inputs, and production trend diagnostics. Do not temporarily write a sensitivity to the production folder and then move it. Resolve and validate output paths before launching workers. Snapshot production-output hashes and verify they remain unchanged after the sensitivity runs.
@@ -149,7 +173,7 @@ Perform focused checks appropriate to these changes:
 4. Run a limited execution check if useful, then run the complete three analyses needed for publication results. Keep pilot outputs separate from complete results.
 5. Validate completeness, country coverage, schemas, finite values, run provenance, and scenario-specific BAU joins before summarizing.
 6. Confirm each table row satisfies BAU minus intervention deaths, the percentage calculation, and the inclusive 25-year annual average; confirm base-case agreement with the main table.
-7. Verify the production model files and manifests were not overwritten and the main default parameters remain exactly as specified.
+7. Verify the production model files and manifests were not overwritten, the main default parameters remain exactly as specified, and all DSA outputs are ignored and absent from the Git index while local files are preserved.
 8. Render the artifact builder and then the manuscript using the repository's supported workflow, checking main-text scalars against Table S8. Report unavailable render dependencies honestly.
 
 Finish with a concise list of changed files, the three analyses and their exact output paths, commands to rerun stage 8 and render the manuscript, validation results, and any unresolved blockers. Distinguish checks actually run from commands merely provided. Do not claim full execution or reproducibility if only a pilot, parse check, or partial render was possible.

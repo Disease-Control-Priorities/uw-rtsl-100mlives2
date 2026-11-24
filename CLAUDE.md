@@ -21,7 +21,7 @@ Paths are **absolute**, hardcoded to the author's OneDrive folder (`wd <- "C:/Us
 - `wd_code` = `code/`
 - `wd_raw` = `data-raw/`: original GBD, UN WPP, NCD-RisC, sodium, TFA and statin sources. Gitignored except `*.md`.
 - `wd_data` = `data/processed/`: prepared model inputs.
-- `wd_outp` = `output/`
+- `wd_outp` = `output/`. `output/uncertainty/dsa/` (stage-8 outputs) is gitignored entirely.
 - `wd_temp` = `temp/`: intermediate files and calibration pilots. Gitignored.
 
 ## Pipeline and data flow
@@ -31,20 +31,19 @@ Paths are **absolute**, hardcoded to the author's OneDrive folder (`wd <- "C:/Us
 | 1 | `1. get_base_population_100.R` | `data/processed/UN2024/PopulationsSingleAge0050.rds`, `PopulationsAge20_*.csv`; `data-raw/GBD/totalpop_baseline_ihme.rds` |
 | 1 | `1. get_base_rates_100_gbd23.R` | `baseline_rates_part{1..5}.rds`, root `locs.rds`, `data-raw/GBD/temp_1baseline_rates_gbd23.rds` (GBD targets, reused later) |
 | 2 | `2. get_tps_100_gbd23.R` | `tps_inpt_part{1..5}.rds` (historical transition probabilities) |
-| 2 | `2. get_tps_bgmx_100_gbd23.R` | `tps_bgmx_{,all_,cvd_}forecasted.rds`, `tps_bgmx_cvd_ihme.rds` (background-mortality forecasts) |
+| 2 | `2. get_tps_bgmx_100_gbd23.R` | `tps_mortality_coherent_{forecasted,validation,diagnostics}.rds` (default coherent forecast); `tps_bgmx_{,all_,cvd_}forecasted.rds` (independent Lee–Carter, "legacy"); `tps_bgmx_cvd_ihme.rds` (GBD 2019 Foresight CF change) |
 | 3 | `3. risk_factors_100.R` (+ `_sodium.R` validation vs older GBD rounds) | `Sodium/sodium_data.rds`, `TFAPolicy/tfa_data.rds`, `Statins/af_statins.rds` |
-| 4 | `4.prepare_interventions.R` | `Sodium/sodium_policy_scenarios.rds`, `TFAPolicy/tfa_policy_scenarios.rds`, `Statins/statin_data.rds`, `BloodPressure/hbp_control_data.rds`, `covfxn2.csv` |
+| 4 | `4. prepare_interventions.R` | `Sodium/sodium_policy_scenarios.rds`, `TFAPolicy/tfa_policy_scenarios.rds`, `Statins/statin_data.rds`, `BloodPressure/hbp_control_data.rds`, `covfxn2.csv` |
 | 5 | `5. calibration.R` | `adjusted_searo_part{1..10}.rds` (calibrated historical IR/CF, 2000–2019) and `output/calibration/calibration_*` diagnostics |
 | 6 | `6. build_baseline.R` | in-memory projection panel 2017–2050 for stage 7 (no files) |
-| 7 | `7. model_100_multiplicative_func_new3_gbd23_noaroc.R` | `output/out_model/model_output_part_<Country>.rds` + `log_<Country>.txt` |
+| 7 | `7. model_100_multiplicative_func_new3_gbd23_noaroc.R` | `output/out_model/model_output_part_<Country>.rds` + `log_<Country>.txt`; the master adds `model_run_manifest.rds` |
+| 8 | `8. run_sensitivity.R` (+ `8.0_sensitivity_helpers.R`, `8.1_…`, `8.2_…`, `8.3_…`) | `output/uncertainty/dsa/out_model_{ihme_foresight,lc,no_trends}/` (country files in an `out_model/` child, `dsa_manifest.rds`) |
 
-Stages 8 (`8. run_sensitivity.R`) and 9 (`9. run_benchmark.R`) are wired into the master script but the scripts do not exist yet.
+Stage 9 (`9. run_benchmark.R`) is wired into the master script but the script does not exist yet.
 
-Stage 4 is `4.prepare_interventions.R`. Compared with the older `4. interventions_100_tfa2_statins2.R` (kept for reference, not sourced), it:
+Stage 4 is `4. prepare_interventions.R`. Compared with the older `4. interventions_100_tfa2_statins2.R` (kept for reference, not sourced), it:
 - weights sodium and TFA means with the IHME baseline population (`totalpop_baseline_ihme.rds`, from stage 1) instead of `totalpop_ihme.rds`;
 - carries Indonesia's 2022 TFA value forward to 2023–2050 and clears its policy dates, because GBD reports TFA = 0 from 2023 but Indonesia has passed no ban.
-
-**Known mismatch:** `0. master.R` sources `"4. prepare_interventions.R"` (with a space), but the file is named `4.prepare_interventions.R`, so stage 4 fails when run from the master.
 
 The old two-pass calibration (`5. calibration_100_gbd23.R` + `5. adjustments_100_gbd23.R`) has been deleted; root `adjustments2023_age.csv`, which it wrote, is no longer read by anything.
 
@@ -61,7 +60,9 @@ Large tables are split into `*_partN.rds` files and read back with `list.files(p
 
 ### Stage 6: baseline
 
-Reads the calibrated historical rates (read only), attaches UN WPP 2024 populations and age-20 cohorts, BP and coverage inputs, extends 2019 rates to 2020–2050, adds COVID excess mortality (2020–2021), applies the prospective secular trends (`run_bgmx_trend`, `run_CF_trend`, `run_CF_trend_80` = 80% of the CF trend, `run_CF_trend_ihme`) and final probability guards. All prospective assumptions belong here, never in the calibration. It checks that `stage7_first_year` matches the year stage 7 filters on, then trims `b_rates` to that year onward.
+Reads the calibrated historical rates (read only), attaches UN WPP 2024 populations and age-20 cohorts, BP and coverage inputs, extends 2019 rates to 2020–2050, adds COVID excess mortality (2020–2021), applies the prospective secular trends and final probability guards. All prospective assumptions belong here, never in the calibration. It checks that `stage7_first_year` matches the year stage 7 filters on, then trims `b_rates` to that year onward.
+
+Trend settings in the master (main-run defaults, keep them): `mortality_trend_method = "coherent"`, `run_bgmx_trend = TRUE`, `run_CF_trend = TRUE`, `run_CF_trend_80 = TRUE` (CF changes by 80% of the *cumulative* relative change: `CF[t] = CF[2019] * (1 + 0.8 * (R[t] - 1))`, not an annual rate), `run_CF_trend_ihme = FALSE` (full Foresight change; mutually exclusive with `run_CF_trend_80`). `trend_config$method` and `trend_config$cf_share` must stay synchronised with the switches; `check_trend_settings()` and `trend_cf_share()` in the master enforce this, for the main run and for every stage-8 analysis.
 
 ### Stage 7: model
 
@@ -74,6 +75,22 @@ Reads the calibrated historical rates (read only), attaches UN WPP 2024 populati
 - Don't edit the stage-7 runner without the user's explicit approval. If workers die mid-run ("error reading from connection"), reduce workers and set `data.table::setDTthreads(1)` per worker from the calling session rather than changing the file.
 - `validate_intervention_results()` checks for negative or NA states, population-conservation mismatches and effect multipliers outside [0, 2].
 
+### Stage 8: mortality-trend sensitivity analyses (Table S8)
+
+```
+Rscript "code/0. master.R" 8                         # all three analyses (~2 h with 3 workers)
+Rscript "code/0. master.R" 8 "--dsa=lc"              # one analysis: ihme_foresight, lc or no_trends
+Rscript "code/0. master.R" 8 "--dsa-pilot=Norway"    # execution check -> output/uncertainty/dsa/pilot/
+Rscript "code/0. master.R" 8 "--dsa-workers=2"       # fewer PSOCK workers if they die
+```
+
+- Each subfile (`8.1_sensitivity_ihme_foresight.R`, `8.2_sensitivity_lc.R`, `8.3_sensitivity_no_trends.R`) declares one analysis's five trend switches with `dsa_spec()` and an entry point `run_dsa_<name>()`. The base case is the production run (`output/out_model/`); stage 8 never reruns it or changes the master's switches.
+  - `ihme_foresight`: coherent background trends + full GBD 2019 Foresight CF change (the `gbd2023_foresight_*` file names are the download batch; the footer says GBD 2019).
+  - `lc`: `mortality_trend_method = "legacy"` (independent Lee–Carter), full CF change. It breaks ALL = other + ΣCVD, so the four cause models' populations drift apart slightly (≤0.03%); the artifact builder bounds this instead of applying its strict shared-population check.
+  - `no_trends`: coherent method with `run_bgmx_trend` and `run_CF_trend` off (2019 rates held; population change and COVID still apply).
+- `8.0_sensitivity_helpers.R` runs each analysis in a **fresh Rscript child**: it attaches the parent's packages in order, sets the master's globals with `wd_outp` = the analysis folder, sources the unchanged stages 6 and 7, and caps workers with a session-only `makeCluster()` wrapper. It refuses to run unless the calibration, runner md5 and inputs match the production manifest; it hashes production outputs/inputs before and after (any change stops stage 8); and it writes `dsa_manifest.rds` with status `complete` only after validating every country file.
+- **Do not edit any code file (master, stages 6/7, `code/8*`) while stage 8 runs**: each child re-checks code, input and trend-file md5s at the end and fails if any changed.
+
 `R/functions_review_6_100.R` duplicates `code/functions_review_6_100.R` (the master sources the `code/` copy). `R/coverage_newfig.R` holds coverage-figure code.
 
 ## Reporting and manuscript
@@ -85,10 +102,10 @@ Rscript -e "rmarkdown::render('reports/manuscript-100mlives2-artifacts.Rmd', out
 Rscript -e "rmarkdown::render('manuscript/manuscript-100mlives2.Rmd')"   # → Word via reference.docx + word-layout.lua
 ```
 
-- `reports/manuscript-100mlives2-artifacts.Rmd` is the **only** place manuscript numbers, tables and figures are calculated. It reads project inputs, `output/out_model/*.rds` and `output/calibration/*` (it never reruns the model) and writes `manuscript/artifacts/*.rds` (scalars, display tables, plot data, provenance), `manuscript/tables/*.csv` (T1, T2, TS1–TS10, Math_*), `manuscript/figures/*.png` (fig1–4, figS1–S6) and regenerates `manuscript/manuscript-100mlives2.xlsx` for tracking and review only. Conventions: data.table and ggplot2, no tidyverse, no `setwd()`, paths from the repo root via `rprojroot`. Takes about 3 minutes.
+- `reports/manuscript-100mlives2-artifacts.Rmd` is the **only** place manuscript numbers, tables and figures are calculated. It reads project inputs, `output/out_model/*.rds`, `output/calibration/*` and the stage-8 outputs in `output/uncertainty/dsa/` (it never reruns the model or stage 8, and stops if a stage-8 manifest is missing, incomplete, a pilot, or inconsistent with the production run) and writes `manuscript/artifacts/*.rds` (scalars, display tables, plot data, provenance), `manuscript/tables/*.csv` (T1, T2, TS1–TS11, Math_*), `manuscript/figures/*.png` (fig1–4, figS1–S6) and regenerates `manuscript/manuscript-100mlives2.xlsx` for tracking and review only. Conventions: data.table and ggplot2, no tidyverse, no `setwd()`, paths from the repo root via `rprojroot`. Takes about 8 minutes (it reads 4 × 190 country files).
 - `manuscript/manuscript-100mlives2.Rmd` only loads those artifacts and displays them; it calculates nothing and never reads the xlsx. Uses `references.bib` and `apa.csl`.
 - Results that can't be recalculated yet keep legacy values tagged `REPRO_PENDING` in both Rmds.
-- Analysis windows: interventions start in 2026; cumulative totals use 2026–2050 (Table S8 keeps the legacy 2025–2050 window).
+- Analysis windows: interventions start in 2026; cumulative totals use 2026–2050 everywhere, including Table S8; per-year averages divide by 25. Each Table S8 block compares its interventions with its own BAU, and its base rows must equal Table 2.
 - `reports/UWRTSL-100MLivesRMD_Output.Rmd` is the older exploratory analysis report. It writes `output/out_*.png` figures and tables.
 
-`dev/` holds the task prompts behind past and planned changes (`prompt-reproducible-manuscript.md`, `prompt-update_calibration.md`, `prompt_update_coherent_mortality_trends.md`). Read the relevant one before working in that area. `docs/` holds the math documentation and working-group drafts (gitignored except `*.md`).
+`dev/` holds the task prompts behind past and planned changes (`prompt-reproducible-manuscript.md`, `prompt-update_calibration.md`, `prompt_update_coherent_mortality_trends.md`, `prompt_update_manuscript_sensitivity.md`) and the audit of legacy hard-coded manuscript values (`audit_manuscript_legacy_hardcoded.md`/`.csv`). Read the relevant one before working in that area. `docs/` holds the math documentation and working-group drafts (gitignored except `*.md`).

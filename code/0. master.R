@@ -44,8 +44,10 @@ setwd(wd_code)
 #...........................................................
 # Default: every stage. From a terminal, pass stage numbers to run a subset, e.g.
 #   Rscript "code/0. master.R" 5 6 7     (calibration, baseline, model)
-# Stages 1-4 rebuild the processed inputs from data-raw/. Stages 8-9 source
-# scripts that are not in the repository yet.
+# Stages 1-4 rebuild the processed inputs from data-raw/. Stage 8 runs the deterministic
+# mortality-trend sensitivity analyses (code/8. run_sensitivity.R); each one rebuilds its own
+# stage-6 baseline and runs stage 7 in a separate R process and writes only under
+# output/uncertainty/dsa/. Stage 9 sources a script that is not in the repository yet.
 # Option --stage2-trends-only: stage 2 runs only the mortality-trend script
 # (2. get_tps_bgmx_100_gbd23.R) and leaves tps_inpt_part<N>.rds as they are, e.g.
 #   Rscript "code/0. master.R" 2 6 7 --stage2-trends-only   (trends, baseline, model)
@@ -55,15 +57,28 @@ setwd(wd_code)
 # country's output could not be saved), and record the rerun in that manifest, e.g.
 #   Rscript "code/0. master.R" 6 7 "--stage7-countries=Norway"
 
+# Stage 8 options (default: all three analyses, every modelled country):
+#   --dsa=<a>,<b>            run only the named analyses: ihme_foresight, lc, no_trends
+#   --dsa-pilot=<A>,<B>      execution check on the named countries only; written under
+#                            output/uncertainty/dsa/pilot/ and never read as manuscript results
+#   --dsa-workers=<n>        PSOCK workers per analysis (default 3; use 2 if workers die)
+#   Rscript "code/0. master.R" 8                       (all three analyses)
+#   Rscript "code/0. master.R" 8 "--dsa=lc"            (one analysis)
+#   Rscript "code/0. master.R" 8 "--dsa-pilot=Norway"  (pilot of all three)
+
 run_args  <- commandArgs(trailingOnly = TRUE)
 run_flags <- run_args[startsWith(run_args, "--")]
-bad_flags <- setdiff(sub("=.*$", "", run_flags), c("--stage2-trends-only", "--stage7-countries"))
+bad_flags <- setdiff(sub("=.*$", "", run_flags), c("--stage2-trends-only", "--stage7-countries", "--dsa", "--dsa-pilot", "--dsa-workers"))
 if (length(bad_flags)) stop("Unknown option(s): ", paste(bad_flags, collapse = ", "))
 stage2_trends_only <- "--stage2-trends-only" %in% run_flags
-stage7_countries <- local({
-  f <- grep("^--stage7-countries=", run_flags, value = TRUE)
-  if (!length(f)) NULL else trimws(unlist(strsplit(sub("^--stage7-countries=", "", f), ",")))
-})
+flag_list <- function(name) {   # values of --<name>=a,b as a character vector, or NULL when absent
+  f <- grep(paste0("^--", name, "="), run_flags, value = TRUE)
+  if (!length(f)) NULL else trimws(unlist(strsplit(sub(paste0("^--", name, "="), "", f), ",")))
+}
+stage7_countries <- flag_list("stage7-countries")
+dsa_analyses     <- flag_list("dsa")
+dsa_pilot        <- flag_list("dsa-pilot")
+dsa_workers      <- suppressWarnings(as.integer(flag_list("dsa-workers")))
 run_stages <- local({
   a <- run_args[!startsWith(run_args, "--")]
   if (length(a)) as.integer(a) else 1:9
@@ -72,6 +87,14 @@ if (anyNA(run_stages) || !all(run_stages %in% 1:9)) stop("run_stages must be sta
 if (stage2_trends_only && !(2 %in% run_stages)) stop("--stage2-trends-only needs stage 2 in the run.")
 if (!is.null(stage7_countries) && (!all(c(6, 7) %in% run_stages) || !length(stage7_countries) || any(!nzchar(stage7_countries))))
   stop("--stage7-countries needs stages 6 and 7 in the run and at least one country name.")
+for (f in c("dsa", "dsa-pilot", "dsa-workers")) {
+  v <- flag_list(f)
+  if (!is.null(v) && (!(8 %in% run_stages) || !length(v) || any(!nzchar(v))))
+    stop("--", f, " needs stage 8 in the run and at least one name.")
+}
+if (length(dsa_workers) && (length(dsa_workers) != 1L || is.na(dsa_workers) || dsa_workers < 1L))
+  stop("--dsa-workers needs one positive integer.")
+rm(f, v)
 
 #...........................................................
 # 0. Functions and parameters-----
@@ -92,22 +115,26 @@ run_aod_par <- FALSE # set to TRUE to run model with dementia
 #              which scale BG.mx, BG.mx.all and CF separately.
 mortality_trend_method <- "coherent"
 
-# Trend the projected mortality inputs (coherent: DIS.mx.t0, BG.mx.all, ALL.mx, BG.mx;
-# legacy: BG.mx and BG.mx.all)
+# Trend the projected mortality inputs:
+# coherent: DIS.mx.t0, BG.mx.all, ALL.mx, BG.mx;
+# legacy: BG.mx and BG.mx.all.
 run_bgmx_trend <- TRUE
 
-# Trend case fatality with the projected change in the cause's population death rate
-run_CF_trend   <- TRUE
+# Trend case fatality with the projected change in the cause's population death rate.
+run_CF_trend <- TRUE
 
-# Baseline scenario 80% of secular trend. 20% historically explained by
-# HTN control improvements (a modelling assumption): CF changes by 80% of the
-# cumulative relative change, CF[t] = CF[2019] * (1 + 0.8 * (R[t] - 1)).
+# Modelling assumption: 20% of historical improvement was explained by HTN
+# control improvements; apply 80% of the cumulative relative change to CF:
+# CF[t] = CF[2019] * (1 + 0.8 * (R[t] - 1)).
+run_CF_trend_80 <- TRUE
 
-run_CF_trend_80   <- TRUE
+# Alternative CF trend: full GBD Foresight ASMR change (replaces the CF trend of either method).
+# Mutually exclusive with run_CF_trend_80.
+run_CF_trend_ihme <- FALSE
 
-# Alternative CF trend: GBD Foresight age-standardised CVD rates (full change; replaces the
-# CF trend of either method, so it cannot be combined with run_CF_trend_80)
-run_CF_trend_ihme  <- FALSE
+# These five switches define the main (production) run. Stage 8 never changes them: each
+# sensitivity analysis declares its own five values in code/8.<n>_sensitivity_*.R and passes
+# them, with a synchronised copy of trend_config, to a separate R process.
 
 # First year stage 7 reads from b_rates: project.all() uses b_rates[location == Country & year>= 2017]
 # and seeds its cohort there. Stage 6 checks this against the stage-7 code and passes only these years
@@ -207,9 +234,13 @@ cal_config <- list(
 # The single source of truth for code/2. get_tps_bgmx_100_gbd23.R and the trend step of
 # code/6. build_baseline.R. Validated below against the switches above and cal_config.
 
+# Share of the cumulative relative CF change applied (coherent and legacy LC): 80% with
+# run_CF_trend_80, otherwise the full change. It scales the cumulative change, not an annual rate.
+trend_cf_share <- function(run_CF_trend_80) if (isTRUE(run_CF_trend_80)) 0.8 else 1
+
 trend_config <- list(
   method        = mortality_trend_method,
-  cf_share      = if (isTRUE(run_CF_trend_80)) 0.8 else 1,   # share of the cumulative CF change (coherent and legacy LC)
+  cf_share      = trend_cf_share(run_CF_trend_80),   # share of the cumulative CF change (coherent and legacy LC)
   ## Data and windows
   years_hist    = 2000:2019,  # Global series fitted (GBD 2023 x UN-WPP 2024, from tps_inpt)
   training_end  = 2015L,      # holdout: fit 2000-2015 only, forecast and score 2016-2019
@@ -230,25 +261,35 @@ trend_config <- list(
   out_dir       = wd_data
 )
 
-local({
+# Checks one set of switches against a trend_config (method and cf_share must be synchronised
+# with the switches) and against cal_config. Used here for the main run and by stage 8 for each
+# sensitivity analysis's own switches; it only reads its arguments.
+trend_switch_names <- c("mortality_trend_method", "run_bgmx_trend", "run_CF_trend", "run_CF_trend_80", "run_CF_trend_ihme")
+check_trend_settings <- function(sw, tc = trend_config, cc = cal_config) {
   bad <- function(msg) stop("Trend settings: ", msg, call. = FALSE)
-  for (v in c("run_bgmx_trend", "run_CF_trend", "run_CF_trend_80", "run_CF_trend_ihme")) {
-    x <- get(v, envir = globalenv())
+  if (!setequal(names(sw), trend_switch_names)) bad(paste("switches must be exactly", paste(trend_switch_names, collapse = ", ")))
+  for (v in trend_switch_names[-1]) {
+    x <- sw[[v]]
     if (!is.logical(x) || length(x) != 1L || is.na(x)) bad(paste(v, "must be TRUE or FALSE"))
   }
-  if (!identical(length(trend_config$method), 1L) || !trend_config$method %in% c("coherent", "legacy"))
+  if (!is.character(sw$mortality_trend_method) || length(sw$mortality_trend_method) != 1L ||
+      !sw$mortality_trend_method %in% c("coherent", "legacy"))
     bad("mortality_trend_method must be \"coherent\" or \"legacy\"")
-  if (run_CF_trend_ihme && !run_CF_trend) bad("run_CF_trend_ihme = TRUE needs run_CF_trend = TRUE")
-  if (run_CF_trend_ihme && run_CF_trend_80)
+  if (!identical(tc$method, sw$mortality_trend_method)) bad("trend_config$method differs from mortality_trend_method")
+  if (!identical(tc$cf_share, trend_cf_share(sw$run_CF_trend_80))) bad("trend_config$cf_share differs from run_CF_trend_80")
+  if (sw$run_CF_trend_ihme && !sw$run_CF_trend) bad("run_CF_trend_ihme = TRUE needs run_CF_trend = TRUE")
+  if (sw$run_CF_trend_ihme && sw$run_CF_trend_80)
     bad("run_CF_trend_ihme applies the full Foresight change; set run_CF_trend_80 = FALSE to use it")
-  if (!identical(as.integer(trend_config$years_hist), as.integer(cal_config$years_hist))) bad("years_hist differs from cal_config")
-  if (trend_config$anchor_year != cal_config$obs_end) bad("anchor_year differs from cal_config$obs_end")
-  if (trend_config$forecast_end != max(cal_config$years_proj)) bad("forecast_end differs from cal_config$years_proj")
-  if (!identical(as.integer(trend_config$ages), as.integer(cal_config$ages)) ||
-      trend_config$open_age != cal_config$open_age) bad("ages differ from cal_config")
-  if (!identical(trend_config$sexes, cal_config$sexes)) bad("sexes differ from cal_config")
-  if (!identical(unname(trend_config$causes), cal_config$causes)) bad("causes differ from cal_config")
-})
+  if (!identical(as.integer(tc$years_hist), as.integer(cc$years_hist))) bad("years_hist differs from cal_config")
+  if (tc$anchor_year != cc$obs_end) bad("anchor_year differs from cal_config$obs_end")
+  if (tc$forecast_end != max(cc$years_proj)) bad("forecast_end differs from cal_config$years_proj")
+  if (!identical(as.integer(tc$ages), as.integer(cc$ages)) ||
+      tc$open_age != cc$open_age) bad("ages differ from cal_config")
+  if (!identical(tc$sexes, cc$sexes)) bad("sexes differ from cal_config")
+  if (!identical(unname(tc$causes), cc$causes)) bad("causes differ from cal_config")
+  invisible(TRUE)
+}
+check_trend_settings(mget(trend_switch_names))
 
 #...........................................................
 # 1. Base rates (State and Risks)-----
@@ -388,6 +429,12 @@ if (7 %in% run_stages) {
 #...........................................................
 # 8. sensitivity-----
 #...........................................................
+# Deterministic mortality-trend sensitivity analyses for Table S8 (default: all three of
+# code/8.1_sensitivity_ihme_foresight.R, 8.2_sensitivity_lc.R and 8.3_sensitivity_no_trends.R).
+# Each reuses the stage-5 calibration, rebuilds its own stage-6 baseline from it and runs the
+# unchanged stage-7 runner in a fresh R process, writing only under output/uncertainty/dsa/;
+# the main-run switches, configuration and outputs above are not changed. Options: --dsa, --dsa-pilot,
+# --dsa-workers.
 
 if (8 %in% run_stages) {
   source(paste0(wd_code, "8. run_sensitivity.R"))

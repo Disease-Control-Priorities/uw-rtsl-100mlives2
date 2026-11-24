@@ -16,3 +16,6 @@ temp/**/*.*
 output/uncertainty/**/*
 !output/uncertainty/**/
 !output/uncertainty/**/*.md
+
+# Deterministic sensitivity analysis outputs
+/output/uncertainty/dsa/

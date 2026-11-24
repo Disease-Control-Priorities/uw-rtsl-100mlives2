@@ -1,5 +1,5 @@
 ---
-title: "Four Public Health Interventions to Improve Cardiovascular Health Worldwide: A Modeling Study"
+title: "Projected Cardiovascular Mortality Benefits of Four Prevention Strategies Worldwide, 2026–2050: A Modeling Study"
 author:
   - 'William Garcia^1\*^'
   - 'Obehioye Aimiosior^2^'
@@ -15,7 +15,7 @@ author:
   - 'Scott J. Pilla^3^'
   - 'Kathryn Foti^7^'
   - 'David A. Watkins^1,6^'
-date: "October 31, 2026"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output:
   word_document:
     reference_docx: reference.docx
@@ -91,6 +91,10 @@ show_tab <- function(df, caption, align = NULL, widths = NULL) {
 
 **Short title:** Global Cardiovascular Health: Four Interventions
 
+```{=openxml}
+<w:p><w:r><w:br w:type="page"/></w:r></w:p>
+```
+
 **Affiliations:**
 
 1.  Department of Global Health, University of Washington, Seattle, USA
@@ -103,9 +107,6 @@ show_tab <- function(df, caption, align = NULL, widths = NULL) {
 8.  The George Institute for Global Health, Sydney, Australia
 9.  Uppsala University, Uppsala, Sweden
 
-```{=openxml}
-<w:p><w:r><w:br w:type="page"/></w:r></w:p>
-```
 
 **\* Correspondence to:**
 
@@ -124,7 +125,7 @@ Email: wrgg\@uw.edu
 
 # Abstract
 
-**Background:** Non-communicable diseases cause 75% of global deaths, most of them from cardiovascular disease (CVD). Previous research found that three public health interventions could save 94 million lives over 2015–2040, but disease burden, risk factor trends, and the evidence base for CVD interventions have changed substantially since then.
+**Background:** [Non-communicable diseases cause 75% of global deaths, most of them from cardiovascular disease (CVD). Previous research found that three public health interventions could save 94 million lives over 2015–2040, but disease burden, risk factor trends, and the evidence base for CVD interventions have changed substantially since then.]{.mark}
 
 **Methods:** The previous multicountry modeling study was updated and expanded to assess the potential impact of scaling up four public health interventions for CVD prevention, with statin therapy added as a fourth intervention. The analysis assumes scale-up beginning in 2026 toward feasible targets: 50% hypertension control by 2040, 30% lower sodium intake by 2030, immediate elimination of artificial trans fatty acids, and 60% statin uptake among high-risk groups by 2050. A validated mathematical model predicted fatal and nonfatal CVD in `r sc("n_countries")` countries comprising `r sc("pop_coverage_pct")`% of the world population. The model projected the reduction in cardiovascular risk that would result from increased exposure to the four interventions, integrating data from meta-analyses to calculate reductions in disease incidence and case fatality. Overall results were disaggregated by location, intervention, and cause of death to understand the relative impact of the interventions.
 
@@ -231,7 +232,7 @@ To project intervention roll-outs over 2026–2050, we first defined current and
 
 ## Sensitivity analyses
 
-To understand the consequences of our assumptions about background and cause-specific mortality trends, **Table S8** (Supplemental Material) compares the base case with three alternative trend assumptions from earlier model runs: no background and CVD secular trends; independently forecast Lee–Carter trends for background and CVD mortality; and CVD trends from the GBD 2019 Foresight reference scenario as an external benchmark. These earlier runs used a previous calibration and independently forecast (not reconciled) base-case trends, and have not yet been repeated with the current model, so they are shown for reference only.
+To understand the consequences of our assumptions about secular trends in background and cause-specific mortality, we repeated the full analysis, business as usual and every intervention scenario, under three alternative trend assumptions and compared them with the base case (**Table S8**, Supplemental Material). All four analyses used the same calibrated historical rates, populations, COVID-19 adjustment, intervention scenarios and model; only the prospective trend assumptions differed, and each analysis compared its interventions with its own business-as-usual projection. The base case used the coherent forecast described above, with case fatality changed by `r sc("mf_cf_share_pct")`% of the projected change in each cause's death rate. The alternatives were: (1) no secular trends, holding each country's 2019 cause-specific and other-cause death rates and case fatality constant (death counts still change with population growth and ageing and with COVID-19 excess mortality in 2020–2021); (2) independent Lee–Carter forecasts of the Global background and cause-specific death rates, fitted to 2000–2015 and not reconciled, which scaled background mortality, with case fatality changed by the full forecast change in each cause's death rate; and (3) the coherent background mortality trends of the base case, with case fatality changed instead by the full change since 2019 in each cause's global age-standardized death rate in the GBD 2019 Foresight reference scenario. The third analysis replaces only the case-fatality trend; it is not an IHME-based population or mortality projection.
 
 ## Data and code availability
 
@@ -263,20 +264,7 @@ Phasing out trans fats from the food supply could delay roughly `r sc("dd_tfa_to
 
 Scaling up statin therapy in high-risk, untreated adults could delay an estimated `r sc("dd_statins_total_M")` million deaths (about `r sc("dd_statins_per_year_k")` annually), amounting to a `r sc("pct_statins")`% reduction in deaths from CVD. The benefits would concentrate on atherosclerotic CVD: IHD deaths delayed would be `r sc("dd_statins_ihd_M")` million (`r sc("pct_statins_ihd")`%), and ischemic stroke deaths delayed could be `r sc("dd_statins_istroke_M")` million (`r sc("pct_statins_istroke")`%). The percentage reduction would be similar for men and women, and larger in people younger than 70 years (`r sc("pct_statins_u70")`%) than in those 70 years or older (`r sc("pct_statins_o70")`%), mirroring the longer horizon available for accruing risk reduction. The sharpest regional declines could be in Latin America & the Caribbean (`r sc("pct_statins_reg_lac")`%), North Africa & the Middle East (`r sc("pct_statins_reg_name")`%), and Central and Eastern Europe (`r sc("pct_statins_reg_cee")`%); high-income countries, with greater baseline lipid-lowering coverage, would have a more modest `r sc("pct_statins_reg_hi")`% decrease.
 
-```{r pending-sensitivity-text, include=FALSE}
-# REPRO_PENDING [Sensitivity analysis paragraph + Table S8]
-# Status: preserved_pending. 116, 117, 102 million and 17%-18% are kept as written (legacy Table S8).
-# Calibration and trends: these legacy values come from runs with the legacy two-pass calibration and the
-# earlier independently forecast (LC) base-case trends; they predate the single-pass calibration
-# (code/5. calibration.R) and the coherent trends, so they are not comparable with the refreshed base case.
-# The text says so explicitly. The Table S8 base rows are the current coherent-trend run.
-# Missing: the alternative-trend simulation outputs (no trends, LC trends, GBD Foresight trends) with the
-# current calibration and code.
-# To update: run them, compute the values in reports/manuscript-100mlives2-artifacts.Rmd,
-# switch this paragraph to artifact lookups, then delete this marker.
-```
-
-**Sensitivity analysis:** **Table S8** shows the base case next to three alternative trend scenarios from earlier model runs, which used a previous calibration and independently forecast base-case trends and have not yet been repeated with the current model. In those earlier runs, excluding background and CVD trends gave `r sc("sens_no_trend_dd_M")` million deaths delayed, continuing independently forecast Lee–Carter trends gave `r sc("sens_lc_dd_M")` million, and applying GBD 2019 Foresight trends gave `r sc("sens_foresight_dd_M")` million, with relative reductions of `r sc("sens_pct_range")`. These values are not directly comparable with the base-case estimates reported above.
+**Sensitivity analysis:** Under the three alternative mortality-trend assumptions (**Table S8**), the four interventions combined delayed `r sc("sens_no_trend_dd_M")` million deaths with no secular trends (`r sc("sens_no_trend_pct")`% of `r sc("sens_no_trend_bau_M")` million business-as-usual deaths), `r sc("sens_lc_dd_M")` million with independent Lee–Carter trends (`r sc("sens_lc_pct")`% of `r sc("sens_lc_bau_M")` million), and `r sc("sens_foresight_dd_M")` million with case fatality following the GBD 2019 Foresight reference scenario (`r sc("sens_foresight_pct")`% of `r sc("sens_foresight_bau_M")` million), compared with `r sc("dd_all_total_M")` million (`r sc("dd_all_pct")`% of `r sc("bau_total_M")` million) in the base case. Across the four trend assumptions, the number of deaths delayed (`r sc("sens_dd_range_M")` million) rose and fell with the number of deaths projected under business as usual, whereas the relative reduction in cumulative deaths from the four CVD causes varied little (`r sc("sens_pct_range")`). The trend assumptions therefore mainly affect the absolute size of the projected benefit, not its proportional size.
 
 # Discussion
 
@@ -656,26 +644,19 @@ show_tab(tab("TS7_ByCountry"), caption = "**Table S7. Projected CVD deaths, numb
 
 ## Sensitivity analysis
 
-```{r pending-tableS8, include=FALSE}
-# REPRO_PENDING [Table S8 + Sensitivity analysis paragraph]
-# Status: mixed. Base-case rows: the current coherent-trend model run (reproduced, including per year = DD/25).
-# Alternative-trend rows: carried over from the legacy workbook (TS8_Sensitivity!A3:G23), marked "(legacy run)".
-# The whole table stays on the legacy 2025-2050 window, so its base rows differ from Table 2 (2026-2050) in
-# projected, baseline and % (deaths delayed are zero in 2025). The legacy rows divide by 24 per year.
-# Calibration and trends: the legacy rows come from runs with the legacy two-pass calibration and the earlier
-# independently forecast base-case trends; they are not comparable with the refreshed base case.
-# Missing: alternative-trend simulation outputs (no trends, LC trends, GBD Foresight) with the current model.
-# To update: supply those outputs, implement the calculation in
-# reports/manuscript-100mlives2-artifacts.Rmd, switch this text/table to artifact lookups,
-# then delete this marker.
-```
+Secular trends enter the model only through the prospective (2020–2050) rates; the calibration and the historical years are the same in every analysis. Each sensitivity analysis rebuilt the projection from the same calibrated 2019 rates with its own trend assumptions, applied once, and then ran business as usual and all intervention scenarios with the same model, inputs and intervention parameters as the base case. Incidence was held at its 2019 level in all analyses, and the same COVID-19 excess-mortality adjustment and probability bounds were applied. The four trend assumptions were:
+
+- **Base case (coherent trends).** The reconciled Lee–Carter forecast described in *Mortality projection: methods and performance* changes each country's 2019 cause-specific and other-cause death rates by the Global relative change for the same age, sex and cause, and all-cause and background mortality are rebuilt from these parts. Case fatality changes by a share $s$ = `r sc("mf_cf_share_pct")`% of the cumulative relative change in the cause's death rate, $CF_t = CF_{2019}\,[1 + s\,(R_t - 1)]$, where $R_t$ is the cause's projected death rate relative to 2019.
+- **Background and CVD trend LC.** Independent Lee–Carter forecasts (fitted to 2000–2015, period index extrapolated with damped-trend exponential smoothing, not reconciled) of the Global background mortality of each cause model, of the shared other-cause mortality and of each cause's death rate. Each country's 2019 background rates are multiplied by the relative change of the matching forecast, and case fatality changes by the full relative change in the cause's forecast death rate. Because the cause-specific and other-cause rates are not forecast jointly, the projected all-cause rate is no longer the sum of its parts, and the four cause-specific models no longer share exactly one population: within a country, their adult populations summed over 2026–2050 differed by at most `r sc("sens_lc_pop_spread_pct")`%.
+- **No background and no CVD trend.** Each country's 2019 cause-specific and other-cause death rates and its calibrated 2019 case fatality are kept for 2020–2050. "No trend" refers to these rates only: projected deaths still change with population growth and ageing, the evolution of the simulated cohorts, and COVID-19 excess mortality in 2020–2021.
+- **IHME Foresight trends.** Background and cause-specific mortality follow the coherent trends of the base case, and case fatality changes by the full relative change since 2019 in each cause's global, both-sexes, age-standardized death rate in the GBD 2019 Foresight reference scenario (the same release as in Figure S4). This is an alternative case-fatality trend, not age- or sex-specific; it is not an IHME-based population or mortality projection.
 
 ```{r tableS8}
 show_tab(tab("TS8_Sensitivity"), caption = "**Table S8. Background and CVD mortality trends sensitivity scenarios on million deaths that could be delayed by intervention, 2026-2050**",
          align = c("l", "l", rep("r", 5)))
 ```
 
-Table S8 Notes: Projected deaths delayed are shown under alternative assumptions for secular background and cardiovascular mortality trends, for individual interventions and their combined effect, summed over 2025–2050 (deaths delayed are zero in 2025, so they equal the 2026–2050 totals; projected and baseline deaths include 2025). Base case: the current model with coherent (reconciled) mortality trends and case fatality changed by `r sc("mf_cf_share_pct")`% of the projected cause-specific change. Rows marked "legacy run" come from earlier runs with a previous calibration and independently forecast base-case trends; they have not been repeated with the current model and are not directly comparable with the base case. Deaths delayed per year: base case = deaths delayed / 25 implementation years (2026–2050); legacy rows divided by 24.
+Table S8 Notes: Cardiovascular deaths (millions) summed over 2026–2050 for adults aged 20–95+ in the `r sc("n_countries")` countries and the four CVD causes, as in Table 2, under each mortality-trend assumption, for each intervention and for the four interventions combined (simulated jointly, not the sum of the single-intervention effects). All analyses use the current calibration and model. Each block compares its intervention scenarios with its own business-as-usual projection (Baseline Deaths): deaths delayed = business-as-usual deaths − intervention deaths (Projected Deaths); deaths delayed (%) = deaths delayed / business-as-usual deaths; deaths delayed per year = deaths delayed / 25 (2026–2050). The base-case rows equal Table 2. Trend assumptions are described above.
 
 ```{=openxml}
 <w:p><w:r><w:br w:type="page"/></w:r></w:p>
