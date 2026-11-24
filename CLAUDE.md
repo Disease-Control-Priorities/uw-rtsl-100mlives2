@@ -33,14 +33,20 @@ Paths are **absolute**, hardcoded to the author's OneDrive folder (`wd <- "C:/Us
 | 2 | `2. get_tps_100_gbd23.R` | `tps_inpt_part{1..5}.rds` (historical transition probabilities) |
 | 2 | `2. get_tps_bgmx_100_gbd23.R` | `tps_bgmx_{,all_,cvd_}forecasted.rds`, `tps_bgmx_cvd_ihme.rds` (background-mortality forecasts) |
 | 3 | `3. risk_factors_100.R` (+ `_sodium.R` validation vs older GBD rounds) | `Sodium/sodium_data.rds`, `TFAPolicy/tfa_data.rds`, `Statins/af_statins.rds` |
-| 4 | `4. interventions_100_tfa2_statins2.R` | `Sodium/sodium_policy_scenarios.rds`, `TFAPolicy/tfa_policy_scenarios.rds`, `Statins/statin_data.rds`, `BloodPressure/hbp_control_data.rds`, `covfxn2.csv` |
+| 4 | `4.prepare_interventions.R` | `Sodium/sodium_policy_scenarios.rds`, `TFAPolicy/tfa_policy_scenarios.rds`, `Statins/statin_data.rds`, `BloodPressure/hbp_control_data.rds`, `covfxn2.csv` |
 | 5 | `5. calibration.R` | `adjusted_searo_part{1..10}.rds` (calibrated historical IR/CF, 2000–2019) and `output/calibration/calibration_*` diagnostics |
 | 6 | `6. build_baseline.R` | in-memory projection panel 2017–2050 for stage 7 (no files) |
 | 7 | `7. model_100_multiplicative_func_new3_gbd23_noaroc.R` | `output/out_model/model_output_part_<Country>.rds` + `log_<Country>.txt` |
 
 Stages 8 (`8. run_sensitivity.R`) and 9 (`9. run_benchmark.R`) are wired into the master script but the scripts do not exist yet.
 
-**Legacy files, kept but not sourced:** `5. calibration_100_gbd23.R` and `5. adjustments_100_gbd23.R` (the old two-pass calibration that wrote root `adjustments2023_age.csv`). `4.prepare_interventions.R` is a byte-identical copy of the stage-4 script.
+Stage 4 is `4.prepare_interventions.R`. Compared with the older `4. interventions_100_tfa2_statins2.R` (kept for reference, not sourced), it:
+- weights sodium and TFA means with the IHME baseline population (`totalpop_baseline_ihme.rds`, from stage 1) instead of `totalpop_ihme.rds`;
+- carries Indonesia's 2022 TFA value forward to 2023–2050 and clears its policy dates, because GBD reports TFA = 0 from 2023 but Indonesia has passed no ban.
+
+**Known mismatch:** `0. master.R` sources `"4. prepare_interventions.R"` (with a space), but the file is named `4.prepare_interventions.R`, so stage 4 fails when run from the master.
+
+The old two-pass calibration (`5. calibration_100_gbd23.R` + `5. adjustments_100_gbd23.R`) has been deleted; root `adjustments2023_age.csv`, which it wrote, is no longer read by anything.
 
 Large tables are split into `*_partN.rds` files and read back with `list.files(pattern=...)` followed by `rbindlist`. Some inputs live at the **repo root**: `bp_data6.csv` (`bp_data5.csv` in stage 4), `add_cov_data.csv`, `Country_groupings_extended.csv`, `ettehad_rr_bp_reduction_10mmHg.csv`, `ettehad_rr_bp_reduction_effects.xlsx`, `wpp.adj.Rda` (COVID excess mortality), `locs.rds`.
 
@@ -60,6 +66,8 @@ Reads the calibrated historical rates (read only), attaches UN WPP 2024 populati
 ### Stage 7: model
 
 - `project.all(Country, ...)` runs the multistate well/sick/dead projection for one country. Causes are IHD, ischemic stroke, intracerebral hemorrhage and hypertensive heart disease. Intervention modules adjust incidence (`eff_ir`) and case fatality (`eff_cf`) multiplicatively: `calculate_antihypertensive_impact_etihad` (Ettehad BP-reduction RRs), `calculate_sodium_impact_etihad`, `calculate_tfa_impact`, `calculate_statins_impact`.
+- `calculate_baseline_incidence_gbd()` splits incidence across BP bins as `prob × RRi / alpha`, where `alpha = Σ prob × RRi`. Both the bin RRs and their normaliser must use the **same cause-specific** GBD RR. Hemorrhagic stroke used to take ischemic-stroke RRs in the bins (`RRi_HSTROKE := RRi_ISTROKE`) but its own RRs in `alpha`, so its bins did not sum to the baseline rate. This was fixed in 2026-11 and should not be reintroduced.
+- Sourcing the script defines everything and runs the parallel country loop; the old top-level single-country test run (China) is commented out.
 - `run_multiple_scenarios()` loops over the `scenarios` list: `baseline`, `bp_only`, `sodium_only`, `tfa_only`, `statins_only`, `bp_sodium`, `bp_sodium_tfa`, `all_four`.
 - Scenario parameters are globals set just before the parallel run: `target_control` (0.5 by 2040), `salteff` (30% by 2030), TFA target (0 from 2028), statin coverage (0.60 by 2050, start 2026), adherence and `drugcov`.
 - Countries run in parallel with `foreach`/`doParallel` (`ncores <- 8`). **Any new helper or data object used inside `project.all` must be added to the `clusterExport` varlist**, otherwise the workers fail. Errors are caught per country and written to its log.

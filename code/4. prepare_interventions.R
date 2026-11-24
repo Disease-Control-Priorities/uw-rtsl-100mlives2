@@ -205,12 +205,12 @@ dt_tfa[, location := fcoalesce(name_map[location], location)]
 
 # Computing mean intake per location
 
-dt_pop <- readRDS(file = paste0(wd_raw,"GBD/","totalpop_ihme.rds"))
+# Population weights: IHME baseline population (same source as the sodium section)
+#dt_pop <- readRDS(file = paste0(wd_raw,"GBD/","totalpop_ihme.rds"))
+dt_pop <- readRDS(file = paste0(wd_raw,"GBD/","totalpop_baseline_ihme.rds"))
 
-dt_pop <- dt_pop[, .(location, year_id, sex_name, age_group_name, val),with=T]
-
-setnames(dt_pop, c("val", "year_id","sex_name"),
-                c("population","year","sex"))
+dt_pop <- dt_pop[, .(location, year, sex, age, population = Nx), with = T]
+dt_pop[, age_group_name := age]
 
 name_map <- c(
   "United States of America"          = "United States",
@@ -238,7 +238,7 @@ age_match<-data.frame(age=20:95)%>%
          age.group = ifelse(age>=90 & age<95, "90 to 94", age.group),
          age.group = ifelse(age==95, "95 plus", age.group))
 
-age_match$age <- as.character(age_match$age)
+#age_match$age <- as.character(age_match$age)  # not needed: baseline file has numeric ages
 
 dt_pop[age_group_name == "<1 year", age_group_name := "0"]
 dt_pop[age_group_name == "95 plus", age_group_name := "95"]
@@ -263,7 +263,7 @@ dt_check <- unique(dt_tfa[is.na(population),],by="location")
 dt_tfa_mean <- dt_tfa[, .(tfa_current = weighted.mean(tfa_current,population, na.rm = TRUE),
                           tfa_bpp_date_in_effect = min(tfa_bpp_date_in_effect, na.rm = TRUE),
                           tfa_bpp_date_passed = min(tfa_bpp_date_passed, na.rm = TRUE)),
-                        by = list(year,location)]
+                      by = list(year,location)]
 
 #dt_tfa_mean_24 <- dt_tfa_mean[year==2024,]
 
@@ -285,8 +285,23 @@ dt_tfa_scenarios <- rbind(dt_tfa_mean,dt_tfa_scenarios,fill=T)
 
 dt_tfa_scenarios[,c("tfa_bpp_date_in_effect","tfa_bpp_date_passed"):=NULL]
 dt_tfa_scenarios <- merge(dt_tfa_scenarios, 
-                                  dt_tfa_mean_24[, .(location, tfa_bpp_date_in_effect,tfa_bpp_date_passed)],
-                                  by = "location", all.x = TRUE)
+                          dt_tfa_mean_24[, .(location, tfa_bpp_date_in_effect,tfa_bpp_date_passed)],
+                          by = "location", all.x = TRUE)
+
+
+# Indonesia: GBD reports TFA = 0 from 2023, but Indonesia has not passed a TFA ban.
+# Carry the 2022 value forward to 2023-2050 (2025-2050 rows were copied from 2024 above).
+# This must run before the "once a country reaches 0 it stays 0" step below.
+tfa_idn_2022 <- dt_tfa_scenarios[location == "Indonesia" & year == 2022, tfa_current]
+if (length(tfa_idn_2022) != 1L || is.na(tfa_idn_2022))
+  stop("TFA: expected exactly one non-missing 2022 value for Indonesia.", call. = FALSE)
+dt_tfa_scenarios[location == "Indonesia" & year >= 2023, tfa_current := tfa_idn_2022]
+# No ban passed: clear any policy dates so the pre-2025 ban logic below cannot zero it
+dt_tfa_scenarios[location == "Indonesia", c("tfa_bpp_date_in_effect", "tfa_bpp_date_passed") := NA]
+rm(tfa_idn_2022)
+
+
+
 
 # Fix bpp date for specific locations
 dt_tfa_scenarios[ , tfa_target := tfa_current]

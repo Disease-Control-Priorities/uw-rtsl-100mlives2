@@ -1,5 +1,54 @@
 
 
+#########################################3
+#########################################
+
+write a prompt to ask claude code to:
+
+Goal: update the manuscript sensitivity analysis.
+
+Task: create code/8. run_sensitivity.R script that runs  fo sensitivity analysis in manuscript Background and CVD trend LC / No background and no CVD trend / IHME Foresight trends rows
+
+do not create a long 8*. R , create one subfile for every sensitivity eg 8.1_sensitivity_ihme_foresight.R
+thos subfiles must be calleable from 8*.R
+
+
+since now that method would be the defalut, update code/0.master.R
+
+to avoid overwrite model main outputs, put this deterministic sensitivity analysis in output/uncertainty/dsa/ folder
+which one subfolder for each analysis, eg out_model_ihme_foresight/
+
+Also update manuscript/manuscript-100mlives2.Rmd and reports/manuscript-100mlives2-artifacts.Rmd to have an accurate description of the sensitivy results 
+in main text and in supplementary material
+
+If you identify a prompt that needs to be modified but I did not included,  list it and ask me if I should include it before starting the execution
+
+notice that main output parameters mortality_trend_method <- "coherent"
+
+# Trend the projected mortality inputs (coherent: DIS.mx.t0, BG.mx.all, ALL.mx, BG.mx;
+# legacy: BG.mx and BG.mx.all)
+run_bgmx_trend <- TRUE
+
+# Trend case fatality with the projected change in the cause's population death rate
+run_CF_trend   <- TRUE
+
+# Baseline scenario 80% of secular trend. 20% historically explained by
+# HTN control improvements (a modelling assumption): CF changes by 80% of the
+# cumulative relative change, CF[t] = CF[2019] * (1 + 0.8 * (R[t] - 1)).
+
+run_CF_trend_80   <- TRUE
+
+# Alternative CF trend: GBD Foresight age-standardised CVD rates (full change; replaces the
+# CF trend of either method, so it cannot be combined with run_CF_trend_80)
+run_CF_trend_ihme  <- FALSE
+
+continue as such in 0.master.R
+Use of the data. table library for coding is preferred 
+
+Export the prompt as a .md file
+
+
+
 
 #########################################3
 #########################################

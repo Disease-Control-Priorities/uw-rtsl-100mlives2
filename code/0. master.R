@@ -46,12 +46,32 @@ setwd(wd_code)
 #   Rscript "code/0. master.R" 5 6 7     (calibration, baseline, model)
 # Stages 1-4 rebuild the processed inputs from data-raw/. Stages 8-9 source
 # scripts that are not in the repository yet.
+# Option --stage2-trends-only: stage 2 runs only the mortality-trend script
+# (2. get_tps_bgmx_100_gbd23.R) and leaves tps_inpt_part<N>.rds as they are, e.g.
+#   Rscript "code/0. master.R" 2 6 7 --stage2-trends-only   (trends, baseline, model)
 
+# Option --stage7-countries=<A>,<B>: rerun stage 7 for the named countries only, against a baseline
+# identical to that of the run recorded in output/out_model/model_run_manifest.rds (for example when a
+# country's output could not be saved), and record the rerun in that manifest, e.g.
+#   Rscript "code/0. master.R" 6 7 "--stage7-countries=Norway"
+
+run_args  <- commandArgs(trailingOnly = TRUE)
+run_flags <- run_args[startsWith(run_args, "--")]
+bad_flags <- setdiff(sub("=.*$", "", run_flags), c("--stage2-trends-only", "--stage7-countries"))
+if (length(bad_flags)) stop("Unknown option(s): ", paste(bad_flags, collapse = ", "))
+stage2_trends_only <- "--stage2-trends-only" %in% run_flags
+stage7_countries <- local({
+  f <- grep("^--stage7-countries=", run_flags, value = TRUE)
+  if (!length(f)) NULL else trimws(unlist(strsplit(sub("^--stage7-countries=", "", f), ",")))
+})
 run_stages <- local({
-  a <- commandArgs(trailingOnly = TRUE)
+  a <- run_args[!startsWith(run_args, "--")]
   if (length(a)) as.integer(a) else 1:9
 })
 if (anyNA(run_stages) || !all(run_stages %in% 1:9)) stop("run_stages must be stage numbers 1-9.")
+if (stage2_trends_only && !(2 %in% run_stages)) stop("--stage2-trends-only needs stage 2 in the run.")
+if (!is.null(stage7_countries) && (!all(c(6, 7) %in% run_stages) || !length(stage7_countries) || any(!nzchar(stage7_countries))))
+  stop("--stage7-countries needs stages 6 and 7 in the run and at least one country name.")
 
 #...........................................................
 # 0. Functions and parameters-----
@@ -63,15 +83,30 @@ run_aod_par <- FALSE # set to TRUE to run model with dementia
 
 # Stage 6 projection assumptions (prospective only; never used by the calibration)
 
+# Mortality trend method (stage 2 builds the forecasts, stage 6 applies them):
+#   "coherent" (default): reconciled forecast of all-cause, the four CVD causes and other
+#              causes (Li et al. 2019 forecast reconciliation; tps_mortality_coherent_forecasted.rds).
+#              Each country's 2019 cause and other-cause rates are scaled by the Global
+#              2019-relative changes, and ALL.mx and BG.mx are rebuilt from them.
+#   "legacy":  the earlier independent Lee-Carter forecasts (tps_bgmx_*_forecasted.rds),
+#              which scale BG.mx, BG.mx.all and CF separately.
+mortality_trend_method <- "coherent"
+
+# Trend the projected mortality inputs (coherent: DIS.mx.t0, BG.mx.all, ALL.mx, BG.mx;
+# legacy: BG.mx and BG.mx.all)
 run_bgmx_trend <- TRUE
 
+# Trend case fatality with the projected change in the cause's population death rate
 run_CF_trend   <- TRUE
 
 # Baseline scenario 80% of secular trend. 20% historically explained by
-# HTN control improvements
+# HTN control improvements (a modelling assumption): CF changes by 80% of the
+# cumulative relative change, CF[t] = CF[2019] * (1 + 0.8 * (R[t] - 1)).
 
 run_CF_trend_80   <- TRUE
 
+# Alternative CF trend: GBD Foresight age-standardised CVD rates (full change; replaces the
+# CF trend of either method, so it cannot be combined with run_CF_trend_80)
 run_CF_trend_ihme  <- FALSE
 
 # First year stage 7 reads from b_rates: project.all() uses b_rates[location == Country & year>= 2017]
@@ -167,6 +202,55 @@ cal_config <- list(
 )
 
 #...........................................................
+# Mortality trend settings (stage 2 forecast, stage 6 application) ----
+#...........................................................
+# The single source of truth for code/2. get_tps_bgmx_100_gbd23.R and the trend step of
+# code/6. build_baseline.R. Validated below against the switches above and cal_config.
+
+trend_config <- list(
+  method        = mortality_trend_method,
+  cf_share      = if (isTRUE(run_CF_trend_80)) 0.8 else 1,   # share of the cumulative CF change (coherent and legacy LC)
+  ## Data and windows
+  years_hist    = 2000:2019,  # Global series fitted (GBD 2023 x UN-WPP 2024, from tps_inpt)
+  training_end  = 2015L,      # holdout: fit 2000-2015 only, forecast and score 2016-2019
+  anchor_year   = 2019L,      # cumulative changes are relative to the observed rate of this year
+  forecast_end  = 2050L,      # production: refit on years_hist, forecast anchor_year+1 to forecast_end
+  ages          = 20:95,
+  open_age      = 95L,        # terminal row = 95+
+  sexes         = c("Female", "Male"),
+  causes        = cause_map[c("ihd", "istroke", "hstroke", "hhd")],   # the four disjoint modelled causes
+  ## Method
+  cov_shrinkage = 0.5,        # W = (1 - s) * cov(e) + s * diag(cov(e))
+  rel_tol       = 1e-10,      # relative tolerance for the additive identities
+  ## Inputs (read only) and outputs
+  tps_dir       = wd_data,
+  tps_pattern   = "^tps_inpt_part[0-9]+\\.rds$",
+  pop_file      = paste0(wd_data, "UN2024/PopulationsSingleAge0050.rds"),
+  ihme_dir      = paste0(wd_raw, "GBD/"),
+  out_dir       = wd_data
+)
+
+local({
+  bad <- function(msg) stop("Trend settings: ", msg, call. = FALSE)
+  for (v in c("run_bgmx_trend", "run_CF_trend", "run_CF_trend_80", "run_CF_trend_ihme")) {
+    x <- get(v, envir = globalenv())
+    if (!is.logical(x) || length(x) != 1L || is.na(x)) bad(paste(v, "must be TRUE or FALSE"))
+  }
+  if (!identical(length(trend_config$method), 1L) || !trend_config$method %in% c("coherent", "legacy"))
+    bad("mortality_trend_method must be \"coherent\" or \"legacy\"")
+  if (run_CF_trend_ihme && !run_CF_trend) bad("run_CF_trend_ihme = TRUE needs run_CF_trend = TRUE")
+  if (run_CF_trend_ihme && run_CF_trend_80)
+    bad("run_CF_trend_ihme applies the full Foresight change; set run_CF_trend_80 = FALSE to use it")
+  if (!identical(as.integer(trend_config$years_hist), as.integer(cal_config$years_hist))) bad("years_hist differs from cal_config")
+  if (trend_config$anchor_year != cal_config$obs_end) bad("anchor_year differs from cal_config$obs_end")
+  if (trend_config$forecast_end != max(cal_config$years_proj)) bad("forecast_end differs from cal_config$years_proj")
+  if (!identical(as.integer(trend_config$ages), as.integer(cal_config$ages)) ||
+      trend_config$open_age != cal_config$open_age) bad("ages differ from cal_config")
+  if (!identical(trend_config$sexes, cal_config$sexes)) bad("sexes differ from cal_config")
+  if (!identical(unname(trend_config$causes), cal_config$causes)) bad("causes differ from cal_config")
+})
+
+#...........................................................
 # 1. Base rates (State and Risks)-----
 #...........................................................
 
@@ -180,7 +264,8 @@ if (1 %in% run_stages) {
 #...........................................................
 
 if (2 %in% run_stages) {
-  source(paste0(wd_code, "2. get_tps_100_gbd23.R"))
+  if (!stage2_trends_only) source(paste0(wd_code, "2. get_tps_100_gbd23.R"))
+  # Mortality trends: the coherent forecast (default) plus the legacy and IHME alternatives
   source(paste0(wd_code, "2. get_tps_bgmx_100_gbd23.R"))
 }
 
@@ -200,7 +285,8 @@ if (3 %in% run_stages) {
 #...........................................................
 
 if (4 %in% run_stages) {
-  source(paste0(wd_code, "4. interventions_100_tfa2_statins2.R"))
+  #source(paste0(wd_code, "4. interventions_100_tfa2_statins2.R"))
+  source(paste0(wd_code, "4. prepare_interventions.R"))
 }
 
 #...........................................................
@@ -229,7 +315,74 @@ if (6 %in% run_stages) {
 #...........................................................
 
 if (7 %in% run_stages) {
-  source(paste0(wd_code, "7. model_100_multiplicative_func_new3_gbd23_noaroc.R"))
+  if (!exists("baseline_settings")) stop("Stage 7 needs stage 6 in the same R session (b_rates, baseline_settings).")
+  manifest_file <- paste0(wd_outp, "out_model/model_run_manifest.rds")
+  runner_file <- paste0(wd_code, "7. model_100_multiplicative_func_new3_gbd23_noaroc.R")
+  # What must match for a partial rerun to belong to the run in the manifest.
+  baseline_signature <- function(b, runner_md5) {
+    list(b[c("trend_method", "cf_share", "run_bgmx_trend", "run_CF_trend", "run_CF_trend_80", "run_CF_trend_ihme",
+             "calibration_run_id", "trend_run_id", "stage7_first_year", "n_locations")],
+         b$trend_files[, .(file, md5)], runner_md5)
+  }
+  if (!is.null(stage7_countries)) {
+    if (!file.exists(manifest_file)) stop("--stage7-countries: no ", manifest_file, " to add the rerun to.")
+    prev_manifest <- readRDS(manifest_file)
+    if (!identical(baseline_signature(prev_manifest$baseline, prev_manifest$runner_md5),
+                   baseline_signature(baseline_settings, unname(tools::md5sum(runner_file)))))
+      stop("--stage7-countries: the baseline settings, trend files or runner differ from the run in the manifest; rerun all countries.")
+    unknown <- setdiff(stage7_countries, unique(data.in$location))
+    if (length(unknown)) stop("--stage7-countries: not in the stage-6 country list: ", paste(unknown, collapse = ", "))
+    # The runner models every location in data.in (minus its own exclusions); keep only the named ones.
+    data.in <- data.in[location %in% stage7_countries]
+  }
+  stage7_started <- Sys.time()
+  source(runner_file)
+
+  # Provenance: the baseline this run used and the output files it wrote. A country whose
+  # run fails keeps its earlier file, which is listed here as not written by this run.
+  local({
+    mo_files <- sort(list.files(paste0(wd_outp, "out_model"), pattern = "^model_output_part_.+\\.rds$", full.names = TRUE))
+    written <- file.mtime(mo_files) >= stage7_started
+    runner <- runner_file
+    if (!is.null(stage7_countries)) {
+      # Partial rerun: update the rerun countries' rows of the existing manifest and log the rerun.
+      rerun_files <- paste0("model_output_part_", stage7_countries, ".rds")
+      idx <- match(rerun_files, basename(mo_files))
+      if (anyNA(idx)) stop("--stage7-countries: output file missing for ", paste(rerun_files[is.na(idx)], collapse = ", "))
+      m <- prev_manifest
+      rows <- match(rerun_files, m$files$file)
+      m$files[rows, `:=`(written_this_run = written[idx], mtime = format(file.mtime(mo_files[idx]), "%Y-%m-%d %H:%M:%S"),
+                         md5 = unname(tools::md5sum(mo_files[idx])))]
+      if (!"written_by" %in% names(m$files)) m$files[, written_by := "main run"]
+      m$files[rows, written_by := ifelse(written[idx], paste("rerun", format(stage7_started, "%Y-%m-%d %H:%M:%S")), written_by)]
+      m$reruns <- rbind(m$reruns, data.table(started = format(stage7_started, "%Y-%m-%d %H:%M:%S %Z"),
+                                             completed = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+                                             countries = paste(stage7_countries, collapse = "; "), written = sum(written[idx]),
+                                             baseline_id = baseline_settings$baseline_id,
+                                             master_md5 = unname(tools::md5sum(paste0(wd_code, "0. master.R")))))
+      saveRDS(m, manifest_file)
+      cat(sprintf("Model run manifest %s: rerun of %s added; %d of %d files now written by the run or its reruns\n",
+                  m$run_id, paste(stage7_countries, collapse = ", "), sum(m$files$written_this_run), nrow(m$files)))
+      if (any(!written[idx])) warning("Rerun outputs not written: ", paste(rerun_files[!written[idx]], collapse = ", "), call. = FALSE)
+      return(invisible())
+    }
+    manifest <- list(
+      started = format(stage7_started, "%Y-%m-%d %H:%M:%S %Z"), completed = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+      baseline = baseline_settings,
+      runner_md5 = unname(tools::md5sum(runner)), master_md5 = unname(tools::md5sum(paste0(wd_code, "0. master.R"))),
+      files = data.table(file = basename(mo_files), written_this_run = written,
+                         mtime = format(file.mtime(mo_files), "%Y-%m-%d %H:%M:%S"),
+                         md5 = unname(tools::md5sum(mo_files))))
+    sig <- tempfile(fileext = ".rds")
+    saveRDS(list(manifest$runner_md5, baseline_settings$baseline_id, manifest$files$md5), sig)
+    manifest$run_id <- paste0(format(stage7_started, "%Y%m%d-%H%M%S"), "-", substr(unname(tools::md5sum(sig)), 1, 8))
+    unlink(sig)
+    saveRDS(manifest, paste0(wd_outp, "out_model/model_run_manifest.rds"))
+    cat(sprintf("Model run manifest: %d output files written by this run, %d not rewritten (baseline %s, trends: %s)\n",
+                sum(written), sum(!written), baseline_settings$baseline_id, baseline_settings$trend_method))
+    if (any(!written)) warning("Model outputs not rewritten by this run: ",
+                               paste(head(basename(mo_files[!written]), 10), collapse = ", "), call. = FALSE)
+  })
 }
 
 #...........................................................
